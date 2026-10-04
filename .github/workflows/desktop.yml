@@ -25,9 +25,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/setup@v3
         with:
-          node-version: 22
+          runtime: node@22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -35,15 +35,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - run: npm ci
-      - run: npm run build
+      - run: pnpm ci
+      - run: pnpm run build
       - run: cargo fmt --check
         working-directory: src-tauri
       - run: cargo clippy --locked --all-targets -- -D warnings
         working-directory: src-tauri
       - run: cargo test --locked
         working-directory: src-tauri
-      - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - run: pnpm run tauri build -- --bundles ${{ matrix.bundles }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
