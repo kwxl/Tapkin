@@ -28,7 +28,7 @@ jobs:
       - uses: pnpm/setup@v3
         with:
           runtime: node@22
-          cache: npm
+          cache: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
