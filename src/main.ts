@@ -29,6 +29,14 @@ const pending: (() => void)[] = [];
 const unlisten: UnlistenFn[] = [];
 const field = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
+function updateRangeProgress(range: HTMLInputElement) {
+  const min = Number(range.min) || 0;
+  const max = Number(range.max) || 100;
+  const value = Number(range.value);
+  const progress = max > min ? ((value - min) / (max - min)) * 100 : 0;
+  range.style.setProperty("--range-progress", `${progress}%`);
+}
+
 function error(message: unknown) {
   const text = String(message);
   if (isSettings) {
@@ -61,6 +69,7 @@ function renderSettings() {
   field("skin-path").textContent = view.skin.directory;
   const width = field<HTMLInputElement>("width");
   if (document.activeElement !== width) width.value = String(Math.round(view.settings.window_size.width));
+  updateRangeProgress(width);
   field("size-value").textContent = `${Math.round(view.settings.window_size.width)} × ${Math.round(view.settings.window_size.height)} px`;
   for (const key of ["always_on_top", "click_through", "lock_position", "launch_at_login"] as const) {
     field<HTMLInputElement>(key).checked = view.settings[key];
@@ -165,10 +174,67 @@ if (isSettings) {
       finally { control.disabled = false; renderSettings(); }
     }));
   }
-  field<HTMLInputElement>("width").addEventListener("change", () => void action(async () => {
-    const patch: Patch = { width: Number(field<HTMLInputElement>("width").value) };
-    try { await invoke("update_settings", { patch }); } finally { renderSettings(); }
-  }));
+  const width = field<HTMLInputElement>("width");
+  let pendingWidth: number | undefined;
+  let commitWidth: number | undefined;
+  let resizing = false;
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastPreviewAt = 0;
+
+  async function flushResize() {
+    resizeTimer = undefined;
+    if (resizing) return;
+    const committing = commitWidth !== undefined;
+    const value = committing ? commitWidth : pendingWidth;
+    if (value === undefined) return;
+    pendingWidth = undefined;
+    commitWidth = undefined;
+    resizing = true;
+    lastPreviewAt = performance.now();
+    try {
+      if (committing) {
+        await invoke("update_settings", { patch: { width: value } });
+      } else {
+        await invoke("preview_size", { width: value });
+      }
+    } catch (e) {
+      error(e);
+      // Restore the persisted size if a transient preview fails.
+      if (!committing && pendingWidth === undefined && commitWidth === undefined && view) {
+        commitWidth = view.settings.window_size.width;
+      }
+    } finally {
+      resizing = false;
+      if (pendingWidth !== undefined || commitWidth !== undefined) scheduleResize();
+      else if (committing) renderSettings();
+    }
+  }
+
+  function scheduleResize() {
+    if (resizing || resizeTimer !== undefined) return;
+    const delay = commitWidth !== undefined ? 0 : Math.max(0, 1000 / 30 - (performance.now() - lastPreviewAt));
+    resizeTimer = setTimeout(() => void flushResize(), delay);
+  }
+
+  width.addEventListener("input", () => {
+    updateRangeProgress(width);
+    pendingWidth = Number(width.value);
+    if (view) {
+      const height = Math.min(800, pendingWidth * view.skin.height / view.skin.width);
+      const actualWidth = height * view.skin.width / view.skin.height;
+      field("size-value").textContent = `${Math.round(actualWidth)} × ${Math.round(height)} px`;
+    }
+    scheduleResize();
+  });
+  width.addEventListener("change", () => {
+    commitWidth = Number(width.value);
+    pendingWidth = undefined;
+    if (resizeTimer !== undefined) {
+      clearTimeout(resizeTimer);
+      resizeTimer = undefined;
+    }
+    scheduleResize();
+  });
   // Development-only local signal; never inspect the value of KeyboardEvent.key.
   if (import.meta.env.DEV) {
     field("local-test").hidden = false;

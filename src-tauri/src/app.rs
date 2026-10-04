@@ -385,6 +385,29 @@ fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings,
     Ok(settings)
 }
 #[tauri::command]
+async fn preview_size(app: AppHandle, width: f64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !width.is_finite() || !(64.0..=800.0).contains(&width) {
+            return Err("Width must be 64–800 pixels".into());
+        }
+        let runtime = app.state::<Runtime>();
+        let _mutation = runtime.mutations.lock().unwrap();
+        let (canvas, overlay) = {
+            let data = runtime.data.lock().unwrap();
+            (
+                (data.skin.view.width, data.skin.view.height),
+                data.overlay(),
+            )
+        };
+        overlay
+            .set_size(aspect_size(width, canvas))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn update_settings(app: AppHandle, patch: SettingsPatch) -> Result<AppSettings, String> {
     tauri::async_runtime::spawn_blocking(move || change_settings(&app, patch))
         .await
@@ -724,6 +747,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_view,
             update_settings,
+            preview_size,
             load_skin,
             reload_skin,
             open_skin_folder,
