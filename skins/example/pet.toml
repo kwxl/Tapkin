@@ -1,0 +1,5 @@
+name = "Pixel Cat"
+idle = "idle.png"
+typing = ["typing_1.png", "typing_2.png"]
+typing_timeout_ms = 180
+frame_hold_ms = 60

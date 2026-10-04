@@ -1,0 +1,30 @@
+[package]
+name = "tapkin"
+version = "1.0.0"
+description = "A small, private typing companion for your desktop"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "tapkin_core"
+
+[dependencies]
+base64 = "0.22"
+png = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "0.8"
+tempfile = "3"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

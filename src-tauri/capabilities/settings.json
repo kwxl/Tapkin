@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "Choose a local skin directory",
+  "windows": ["settings"],
+  "permissions": ["dialog:allow-open"]
+}
