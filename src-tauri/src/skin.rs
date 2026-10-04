@@ -54,6 +54,7 @@ pub struct SkinView {
 pub struct Skin {
     pub config: SkinConfig,
     pub view: SkinView,
+    frames: Vec<Vec<u8>>,
 }
 
 fn bounded_read(path: &Path, limit: u64) -> Result<Vec<u8>, SkinError> {
@@ -162,6 +163,7 @@ impl Skin {
             ));
         }
         let mut images = Vec::with_capacity(config.typing.len() + 1);
+        let mut frames = Vec::with_capacity(config.typing.len() + 1);
         let mut canvas = None;
         let mut total_bytes = 0;
         for relative in std::iter::once(&config.idle).chain(&config.typing) {
@@ -188,7 +190,8 @@ impl Skin {
                 )));
             }
             canvas = Some(size);
-            images.push(format!("data:image/png;base64,{}", STANDARD.encode(bytes)));
+            images.push(format!("data:image/png;base64,{}", STANDARD.encode(&bytes)));
+            frames.push(bytes);
         }
         let (width, height) = canvas.expect("the required idle frame has a canvas");
         Ok(Self {
@@ -200,7 +203,13 @@ impl Skin {
                 images,
             },
             config,
+            frames,
         })
+    }
+
+    /// Frames are returned from the validated load, even if files are edited before reload.
+    pub fn frame_png(&self, index: usize) -> Option<&[u8]> {
+        self.frames.get(index).map(Vec::as_slice)
     }
 }
 

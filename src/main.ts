@@ -12,7 +12,7 @@ type Settings = {
 type InputStatus = { active: boolean; retrying: boolean; message: string | null };
 type View = { skin: Skin; settings: Settings; frame: number; revision: number; sequence: number;
   input: InputStatus; warning: string | null; platform: string };
-type FrameEvent = { frame: number; revision: number; sequence: number };
+type FrameEvent = { frame: number; revision: number; sequence: number; image?: string; name?: string };
 type SkinEvent = { skin: Skin; revision: number; sequence: number };
 type SettingsEvent = { settings: Settings; sequence: number };
 type InputStatusEvent = { input: InputStatus; sequence: number };
@@ -83,10 +83,27 @@ function acceptSequence(sequence: number) {
 async function bootstrap() {
   // Listen before requesting the snapshot, then ignore stale frame sequence numbers.
   unlisten.push(await listen<FrameEvent>("pet-frame", ({ payload }) => afterBootstrap(() => {
-    if (view && payload.revision === view.revision && acceptSequence(payload.sequence)) {
-      view.frame = payload.frame;
-      renderFrame();
+    if (!view || payload.revision < view.revision || (isSettings && payload.revision !== view.revision)) return;
+    if (!isSettings && payload.revision > view.revision && !payload.image) return;
+    if (!acceptSequence(payload.sequence)) return;
+    if (!isSettings) {
+      // PNG transport/caching belongs to the Tauri overlay. Settings still uses SkinView.
+      if (payload.revision > view.revision) {
+        view.revision = payload.revision;
+        view.skin.images = [];
+        cache = [];
+        cacheRevision = payload.revision;
+      }
+      if (payload.name) view.skin.name = payload.name;
+      if (payload.image) {
+        view.skin.images[payload.frame] = payload.image;
+        const decoded = new Image();
+        decoded.src = payload.image;
+        cache[payload.frame] = decoded;
+      }
     }
+    view.frame = payload.frame;
+    renderFrame();
   })));
   unlisten.push(await listen<SkinEvent>("skin-changed", ({ payload }) => afterBootstrap(() => {
     if (!view || payload.revision <= view.revision || !acceptSequence(payload.sequence)) return;

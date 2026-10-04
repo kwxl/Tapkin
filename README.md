@@ -2,6 +2,10 @@
 
 A tiny desktop typing companion for **macOS 11+ and Windows 11**, built with Rust and Tauri 2. A transparent, frameless pet sits above your apps, switches PNG frames when you type, and rests when typing stops. No accounts, telemetry, text capture, or runtime network requirement.
 
+## Architecture
+
+Tauri owns Settings, tray/menu and application lifecycle. The floating pet is injected into `TapkinApp` as `Arc<dyn OverlayRenderer>`; its current `TauriOverlayRenderer` preserves the WebView image-swap mechanism. Core typing, skin and settings logic uses project-owned types and can run with a non-Tauri test renderer. See [ARCHITECTURE.md](ARCHITECTURE.md) for the contract, boundaries and future native-overlay integration.
+
 ## Run and build
 
 Install Rust stable and Node.js **22.12+**, plus the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/):
@@ -27,7 +31,7 @@ npm run tauri build -- --bundles app,dmg
 npm run tauri build -- --bundles nsis
 ```
 
-The GitHub Actions template in `ci/desktop.yml` runs formatting, Clippy, tests, the frontend build and installer builds on `macos-latest` and `windows-latest`. To enable it, move it to `.github/workflows/desktop.yml` and commit/push using credentials with workflow write permission. Until then, it is inactive. The workflow retains unsigned installers as artifacts and does not publish releases. Native builds use the runner's CPU architecture; use an Intel Mac or Apple Silicon Mac to build for that architecture.
+The GitHub Actions workflow in `.github/workflows/desktop.yml` runs formatting, Clippy, tests, the frontend build and installer builds on `macos-latest` and `windows-latest`. The workflow retains unsigned installers as artifacts and does not publish releases. Native builds use the runner's CPU architecture; use an Intel Mac or Apple Silicon Mac to build for that architecture.
 
 Development artifacts are unsigned and are not Apple notarized. macOS Gatekeeper or Windows SmartScreen may warn; verify the source/build and use the OS's normal trusted-app opening flow. Do not disable security protections. Signing/notarization can be added to distribution CI later.
 

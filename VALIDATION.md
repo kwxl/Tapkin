@@ -8,14 +8,20 @@ The v1 feature set is implemented. **Native release acceptance is still pending*
 - `npm audit`: no reported vulnerabilities.
 - `cargo fmt --check`: passed.
 - `cargo clippy --locked --all-targets -- -D warnings`: passed for the portable core.
-- `cargo test --locked`: **16 tests passed** on Linux. Symlink-confinement tests also ran; the Unix-only image-symlink test is omitted on Windows.
+- `cargo test --locked`: **22 tests passed** (16 existing unit tests and 6 new non-Tauri overlay contract tests) on Linux. Symlink-confinement tests also ran; the Unix-only image-symlink test is omitted on Windows.
 - Entire desktop Rust code, including Tauri command/context generation and platform hooks: Clippy with `--all-targets -- -D warnings` passed for **`x86_64-pc-windows-gnu`** and **`aarch64-apple-darwin`**.
 - `cargo check --release` passed for both of those desktop targets, including the production frontend embedded into the Tauri context.
-- Headless Chromium smoke test of the production frontend: settings rendering, permission retry UI, click-through setting changes, frame events, stale-event rejection, invalid-reload errors, privacy shortcut invocation, transparent pet DOM and drag/settings command invocation passed with no browser exceptions. **Tauri IPC was mocked**; this does not validate a native tray, pointer pass-through or global keyboard hook.
+- Headless Chromium smoke test of the production frontend: settings rendering, permission retry UI, click-through setting changes, frame events, stale-event rejection, independent overlay skin revisions, first-use PNG/cached frame swaps, Settings skin/preview events, invalid-reload errors, privacy shortcut invocation, transparent pet DOM and drag/settings command invocation passed with no browser exceptions. **Tauri IPC was mocked**; this does not validate a native tray, pointer pass-through or global keyboard hook.
 
 For cross-checks only, the workspace used an extracted MinGW windres with the host C preprocessor and an extracted Debian Clang for Apple's Objective-C dependency. No dependency sources or security settings were modified. Initial macOS checks failed because host GCC does not support `-arch` / `-mmacosx-version-min`; Clang resolved the code-check limitation. These temporary toolchain helpers are not part of Tapkin.
 
-The GitHub Actions workflow is provided as the inactive template `ci/desktop.yml` and has not been executed. Initial repository upload credentials do not permit active workflow registration. Enable the template by moving it to `.github/workflows/desktop.yml` with workflow write permission. It runs the native tests and creates `.app`/`.dmg` and Windows NSIS installer artifacts on the destination operating systems. No signed or unsigned installer has been produced locally, and no release has been published.
+The GitHub Actions workflow is active at `.github/workflows/desktop.yml`, enabled in an existing upstream commit. It runs the native tests and creates `.app`/`.dmg` and Windows NSIS installer artifacts on the destination operating systems. Its results have not been verified in this workspace. No signed or unsigned installer has been produced locally, and no release has been published by this task.
+
+## Overlay extraction coverage
+
+The fake renderer in `src-tauri/tests/overlay_contract.rs` runs the real injected `TapkinApp` without a Tauri window. It covers frame alternation/hold/idle/reset, immutable cached PNG bytes, overlay settings and rollback, skin revisions and failed replacement, movement save deadlines, shutdown position capture, and lock/click-through drag guards. The six tests run with `cargo test --locked --test overlay_contract`.
+
+The refactor preserves the native hook implementations, settings schema, settings controls, artwork and event-driven image swaps. See [ARCHITECTURE.md](ARCHITECTURE.md) for the dependency boundary. Native transparency, hit testing, tray, dragging, monitor/DPI behavior and keyboard permissions remain pending the desktop checks below.
 
 ## Manual acceptance before calling v1.0 release-ready
 

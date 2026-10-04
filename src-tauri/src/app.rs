@@ -1,9 +1,10 @@
 use crate::{
     config::AppSettings,
+    core::{apply_overlay_settings, restore_overlay_settings, FrameChange, InputStatus, TapkinApp},
     input::{platform_backend, InputEvent, InputListener},
+    overlay::{tauri::TauriOverlayRenderer, OverlayRenderer},
     skin::{install_example, Skin, SkinView},
-    state::Animation,
-    window::{aspect_size, restore_position, DisplayRect, Position},
+    window::{aspect_size, Position},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,38 +15,19 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow, WindowEvent,
+    AppHandle, Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
-#[derive(Clone, Serialize)]
-struct InputStatus {
-    active: bool,
-    retrying: bool,
-    message: Option<String>,
-}
-
-struct Data {
-    skin: Skin,
-    settings: AppSettings,
-    animation: Animation,
-    frame: usize,
-    revision: u64,
-    sequence: u64,
-    input: InputStatus,
-    warning: Option<String>,
-    save_at: Option<Duration>,
-}
 struct Runtime {
-    data: Arc<Mutex<Data>>,
+    data: Arc<Mutex<TapkinApp>>,
     tx: SyncSender<EngineEvent>,
-    origin: Instant,
     settings_path: PathBuf,
     listener: Mutex<Option<Box<dyn InputListener>>>,
     generation: AtomicU64,
@@ -54,6 +36,7 @@ struct Runtime {
 enum EngineEvent {
     Key(InputEvent),
     Wake,
+    Moved(Position),
     Failed(u64, String),
     Quit,
 }
@@ -68,12 +51,6 @@ struct View {
     input: InputStatus,
     warning: Option<String>,
     platform: &'static str,
-}
-#[derive(Clone, Serialize)]
-struct FrameEvent {
-    revision: u64,
-    frame: usize,
-    sequence: u64,
 }
 #[derive(Clone, Serialize)]
 struct SkinEvent {
@@ -119,7 +96,8 @@ fn report_error(app: &AppHandle, message: String) {
         let mut data = runtime.data.lock().unwrap();
         data.warning = Some(message.clone());
         data.sequence += 1;
-        let _ = app.emit(
+        let _ = app.emit_to(
+            "settings",
             "app-warning",
             WarningEvent {
                 message,
@@ -129,26 +107,15 @@ fn report_error(app: &AppHandle, message: String) {
     }
     show_settings(app);
 }
-fn pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
-    app.get_webview_window("pet")
-        .ok_or_else(|| "The pet window is unavailable".into())
-}
-fn emit_frame(app: &AppHandle, data: &mut Data, frame: usize) {
-    data.frame = frame;
-    data.sequence += 1;
-    let _ = app.emit(
-        "pet-frame",
-        FrameEvent {
-            revision: data.revision,
-            frame,
-            sequence: data.sequence,
-        },
-    );
+fn emit_preview(app: &AppHandle, frame: FrameChange) {
+    // Settings preview remains usable even when the pet uses a non-Tauri renderer.
+    let _ = app.emit_to("settings", "pet-frame", frame);
 }
 
-fn emit_input_status(app: &AppHandle, data: &mut Data) {
+fn emit_input_status(app: &AppHandle, data: &mut TapkinApp) {
     data.sequence += 1;
-    let _ = app.emit(
+    let _ = app.emit_to(
+        "settings",
         "input-status",
         InputStatusEvent {
             input: data.input.clone(),
@@ -157,9 +124,10 @@ fn emit_input_status(app: &AppHandle, data: &mut Data) {
     );
 }
 
-fn emit_settings(app: &AppHandle, data: &mut Data) {
+fn emit_settings(app: &AppHandle, data: &mut TapkinApp) {
     data.sequence += 1;
-    let _ = app.emit(
+    let _ = app.emit_to(
+        "settings",
         "settings-changed",
         SettingsEvent {
             settings: data.settings.clone(),
@@ -170,19 +138,13 @@ fn emit_settings(app: &AppHandle, data: &mut Data) {
 
 fn engine(
     app: AppHandle,
-    data: Arc<Mutex<Data>>,
+    data: Arc<Mutex<TapkinApp>>,
     rx: Receiver<EngineEvent>,
     origin: Instant,
     settings_path: PathBuf,
 ) {
     loop {
-        let deadline = {
-            let data = data.lock().unwrap();
-            match (data.animation.next_deadline(), data.save_at) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
-            }
-        };
+        let deadline = data.lock().unwrap().next_deadline();
         // Block indefinitely at idle; only animation or a pending settings write needs a timer.
         let event = match deadline {
             Some(at) => match rx.recv_timeout(at.saturating_sub(origin.elapsed())) {
@@ -197,14 +159,17 @@ fn engine(
         };
         let mut failed = false;
         let mut save_error = None;
+        let mut overlay_error = None;
         {
             let mut data = data.lock().unwrap();
             let now = origin.elapsed();
             match event {
                 Some(EngineEvent::Quit) => break,
-                Some(EngineEvent::Key(_)) if data.input.active || cfg!(debug_assertions) => {
-                    if let Some(frame) = data.animation.key(now) {
-                        emit_frame(&app, &mut data, frame);
+                Some(EngineEvent::Key(event)) if data.input.active || cfg!(debug_assertions) => {
+                    match data.on_input(event, now) {
+                        Ok(Some(frame)) => emit_preview(&app, frame),
+                        Ok(None) => {}
+                        Err(error) => overlay_error = Some(error.to_string()),
                     }
                 }
                 Some(EngineEvent::Failed(generation, message))
@@ -215,15 +180,20 @@ fn engine(
                         retrying: false,
                         message: Some(message),
                     };
-                    data.animation.reset();
-                    emit_frame(&app, &mut data, 0);
+                    match data.reset_animation() {
+                        Ok(frame) => emit_preview(&app, frame),
+                        Err(error) => overlay_error = Some(error.to_string()),
+                    }
                     emit_input_status(&app, &mut data);
                     failed = true;
                 }
+                Some(EngineEvent::Moved(position)) => data.record_position(position, now),
                 _ => {}
             }
-            if let Some(frame) = data.animation.tick(now) {
-                emit_frame(&app, &mut data, frame);
+            match data.tick(now) {
+                Ok(Some(frame)) => emit_preview(&app, frame),
+                Ok(None) => {}
+                Err(error) => overlay_error = Some(error.to_string()),
             }
             if data.save_at.is_some_and(|at| now >= at) {
                 data.save_at = None;
@@ -238,6 +208,9 @@ fn engine(
         if let Some(error) = save_error {
             report_error(&app, error);
         }
+        if let Some(error) = overlay_error {
+            report_error(&app, error);
+        }
     }
 }
 
@@ -246,16 +219,25 @@ fn start_listener(app: &AppHandle) -> Result<(), String> {
     let mut listener = runtime.listener.lock().unwrap();
     let generation = runtime.generation.fetch_add(1, Ordering::AcqRel) + 1;
     listener.take(); // Stop the previous hook; queued old failures are ignored.
-    {
+    let render_error = {
         let mut data = runtime.data.lock().unwrap();
         data.input = InputStatus {
             active: false,
             retrying: true,
             message: None,
         };
-        data.animation.reset();
-        emit_frame(app, &mut data, 0);
+        let error = match data.reset_animation() {
+            Ok(frame) => {
+                emit_preview(app, frame);
+                None
+            }
+            Err(error) => Some(error.to_string()),
+        };
         emit_input_status(app, &mut data);
+        error
+    };
+    if let Some(error) = render_error {
+        report_error(app, error);
     }
     let activity_tx = runtime.tx.clone();
     let failure_tx = runtime.tx.clone();
@@ -314,7 +296,7 @@ fn sync_tray(app: &AppHandle) -> Result<(), String> {
         let data = runtime.data.lock().unwrap();
         (data.skin.config.name.clone(), data.settings.clone())
     };
-    // Native menu setters dispatch to the main thread. Never hold Data while waiting.
+    // Native menu setters dispatch to the main thread. Never hold core state while waiting.
     let items = app.state::<TrayItems>();
     items.skin_name.set_text(&name).map_err(|e| e.to_string())?;
     for (item, checked) in [
@@ -327,51 +309,6 @@ fn sync_tray(app: &AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
-fn reposition(window: &WebviewWindow, saved: Option<Position>) -> Result<Position, String> {
-    let monitors = window.available_monitors().map_err(|e| e.to_string())?;
-    let convert = |m: &tauri::Monitor| {
-        let area = m.work_area();
-        DisplayRect {
-            x: area.position.x,
-            y: area.position.y,
-            width: area.size.width,
-            height: area.size.height,
-        }
-    };
-    let primary = window
-        .primary_monitor()
-        .map_err(|e| e.to_string())?
-        .or_else(|| monitors.first().cloned())
-        .ok_or("No display is available")?;
-    let displays: Vec<_> = monitors.iter().map(convert).collect();
-    let size = window.outer_size().map_err(|e| e.to_string())?;
-    let position = restore_position(
-        saved,
-        (size.width, size.height),
-        &displays,
-        convert(&primary),
-    );
-    window
-        .set_position(PhysicalPosition::new(position.x, position.y))
-        .map_err(|e| e.to_string())?;
-    Ok(position)
-}
-fn apply_window(window: &WebviewWindow, settings: &AppSettings) -> Result<(), String> {
-    window
-        .set_always_on_top(settings.always_on_top)
-        .map_err(|e| e.to_string())?;
-    window
-        .set_ignore_cursor_events(settings.click_through)
-        .map_err(|e| e.to_string())?;
-    window
-        .set_size(tauri::LogicalSize::new(
-            settings.window_size.width,
-            settings.window_size.height,
-        ))
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 #[derive(Default, Deserialize)]
 struct SettingsPatch {
     width: Option<f64>,
@@ -383,11 +320,12 @@ struct SettingsPatch {
 fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings, String> {
     let runtime = app.state::<Runtime>();
     let _mutation = runtime.mutations.lock().unwrap();
-    let (old, canvas) = {
+    let (old, canvas, overlay) = {
         let data = runtime.data.lock().unwrap();
         (
             data.settings.clone(),
             (data.skin.view.width, data.skin.view.height),
+            data.overlay(),
         )
     };
     let mut settings = old.clone();
@@ -409,10 +347,9 @@ fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings,
     if let Some(v) = patch.launch_at_login {
         settings.launch_at_login = v;
     }
-    let window = pet_window(app)?;
     let result = (|| {
-        apply_window(&window, &settings)?;
-        settings.window_position = Some(reposition(&window, settings.window_position)?);
+        settings.window_position =
+            Some(apply_overlay_settings(overlay.as_ref(), &settings).map_err(|e| e.to_string())?);
         if settings.launch_at_login != old.launch_at_login {
             let manager = app.autolaunch();
             if settings.launch_at_login {
@@ -432,10 +369,7 @@ fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings,
         Ok::<(), String>(())
     })();
     if let Err(error) = result {
-        let _ = apply_window(&window, &old);
-        if let Some(p) = old.window_position {
-            let _ = window.set_position(PhysicalPosition::new(p.x, p.y));
-        }
+        let _ = restore_overlay_settings(overlay.as_ref(), &old);
         if settings.launch_at_login != old.launch_at_login {
             let manager = app.autolaunch();
             let _ = if old.launch_at_login {
@@ -460,48 +394,49 @@ fn change_skin(app: &AppHandle, directory: PathBuf) -> Result<(), String> {
     let runtime = app.state::<Runtime>();
     let _mutation = runtime.mutations.lock().unwrap();
     let skin = Skin::load(&directory).map_err(|e| e.to_string())?;
-    let old = runtime.data.lock().unwrap().settings.clone();
+    let (old, overlay) = {
+        let data = runtime.data.lock().unwrap();
+        (data.settings.clone(), data.overlay())
+    };
     let mut settings = old.clone();
     settings.selected_skin = skin.view.directory.clone();
     settings.window_size = aspect_size(
         settings.window_size.width,
         (skin.view.width, skin.view.height),
     );
-    let window = pet_window(app)?;
+    let mut saved = false;
     let result = (|| {
-        apply_window(&window, &settings)?;
-        settings.window_position = Some(reposition(&window, settings.window_position)?);
+        settings.window_position =
+            Some(apply_overlay_settings(overlay.as_ref(), &settings).map_err(|e| e.to_string())?);
         let mut data = runtime.data.lock().unwrap();
         settings
             .save(&runtime.settings_path)
             .map_err(|e| format!("Could not save skin selection: {e}"))?;
-        data.animation = Animation::new(
-            skin.config.typing.len(),
-            skin.config.typing_timeout_ms,
-            skin.config.frame_hold_ms,
-        );
-        data.skin = skin;
-        data.settings = settings;
-        data.revision += 1;
-        data.save_at = None;
-        data.warning = None;
-        data.sequence += 1;
-        let _ = app.emit(
+        saved = true;
+        let update = data
+            .replace_skin(skin, settings)
+            .map_err(|e| e.to_string())?;
+        let _ = app.emit_to(
+            "settings",
             "skin-changed",
             SkinEvent {
-                revision: data.revision,
+                revision: update.revision,
                 skin: data.skin.view.clone(),
-                sequence: data.sequence,
+                sequence: update.sequence,
             },
         );
-        emit_frame(app, &mut data, 0);
+        emit_preview(app, update.frame);
         emit_settings(app, &mut data);
         Ok::<(), String>(())
     })();
-    if let Err(error) = result {
-        let _ = apply_window(&window, &old);
-        if let Some(p) = old.window_position {
-            let _ = window.set_position(PhysicalPosition::new(p.x, p.y));
+    if let Err(mut error) = result {
+        let _ = restore_overlay_settings(overlay.as_ref(), &old);
+        if saved {
+            if let Err(save_error) = old.save(&runtime.settings_path) {
+                error.push_str(&format!(
+                    "; could not restore previous settings: {save_error}"
+                ));
+            }
         }
         return Err(error);
     }
@@ -570,13 +505,15 @@ fn open_privacy_settings(app: AppHandle, section: String) -> Result<(), String> 
 }
 #[tauri::command]
 fn drag_pet(app: AppHandle) -> Result<(), String> {
-    let settings = app.state::<Runtime>().data.lock().unwrap().settings.clone();
-    if settings.lock_position || settings.click_through {
+    let runtime = app.state::<Runtime>();
+    let (allowed, overlay) = {
+        let data = runtime.data.lock().unwrap();
+        (data.drag_allowed(), data.overlay())
+    };
+    if !allowed {
         return Ok(());
     }
-    pet_window(&app)?
-        .start_dragging()
-        .map_err(|e| e.to_string())
+    overlay.start_dragging().map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn show_settings_window(app: AppHandle) {
@@ -592,16 +529,30 @@ fn local_test_input(app: AppHandle) -> Result<(), String> {
         .try_send(EngineEvent::Key(InputEvent::AnyKeyPressed))
         .map_err(|e| e.to_string())
 }
+fn flush_settings(runtime: &Runtime) -> Result<(), String> {
+    let overlay = runtime.data.lock().unwrap().overlay();
+    // Geometry calls run outside the state lock and include the last queued movement.
+    let position = overlay.current_position().map_err(|e| e.to_string());
+    let mut data = runtime.data.lock().unwrap();
+    if let Ok(position) = &position {
+        data.settings.window_position = Some(*position);
+    }
+    data.settings
+        .save(&runtime.settings_path)
+        .map_err(|e| e.to_string())?;
+    position.map(|_| ())
+}
 fn quit(app: &AppHandle) {
     let runtime = app.state::<Runtime>();
     runtime.listener.lock().unwrap().take();
-    let settings = runtime.data.lock().unwrap().settings.clone();
-    if let Err(error) = settings.save(&runtime.settings_path) {
+    if let Err(error) = flush_settings(&runtime) {
         report_error(
             app,
             format!("Could not save settings before quitting: {error}"),
         );
     }
+    let overlay = runtime.data.lock().unwrap().overlay();
+    let _ = overlay.set_visible(false);
     let _ = runtime.tx.send(EngineEvent::Quit);
     app.exit(0);
 }
@@ -819,60 +770,36 @@ pub fn run() {
                     warning = Some(format!("Could not check launch-at-login: {error}"));
                 }
             }
-            let animation = Animation::new(
-                skin.config.typing.len(),
-                skin.config.typing_timeout_ms,
-                skin.config.frame_hold_ms,
-            );
-            let data = Arc::new(Mutex::new(Data {
+            let renderer = Arc::new(TauriOverlayRenderer::new(app.handle().clone()));
+            let data = Arc::new(Mutex::new(TapkinApp::new(
                 skin,
-                settings: settings.clone(),
-                animation,
-                frame: 0,
-                revision: 0,
-                sequence: 0,
-                input: InputStatus {
-                    active: false,
-                    retrying: true,
-                    message: None,
-                },
+                settings.clone(),
                 warning,
-                save_at: None,
-            }));
+                renderer.clone(),
+            )));
             let (tx, rx) = mpsc::sync_channel(256);
             let origin = Instant::now();
             app.manage(Runtime {
                 data: Arc::clone(&data),
-                tx,
-                origin,
+                tx: tx.clone(),
                 settings_path: settings_path.clone(),
                 listener: Mutex::new(None),
                 generation: AtomicU64::new(0),
                 mutations: Mutex::new(()),
             });
-            let pet = tauri::WebviewWindowBuilder::new(
-                app,
-                "pet",
-                tauri::WebviewUrl::App("index.html".into()),
-            )
-            .title("Tapkin")
-            .inner_size(settings.window_size.width, settings.window_size.height)
-            .transparent(true)
-            .decorations(false)
-            .shadow(false)
-            .always_on_top(settings.always_on_top)
-            .resizable(false)
-            .skip_taskbar(true)
-            .focusable(false)
-            .focused(false)
-            .visible(false)
-            .build()?;
-            #[cfg(target_os = "macos")]
-            pet.set_visible_on_all_workspaces(true)?;
-            pet.set_ignore_cursor_events(settings.click_through)?;
-            let position =
-                reposition(&pet, settings.window_position).map_err(std::io::Error::other)?;
-            data.lock().unwrap().settings.window_position = Some(position);
+            renderer
+                .create_window(
+                    settings.window_size,
+                    settings.always_on_top,
+                    move |position| {
+                        let _ = tx.try_send(EngineEvent::Moved(position));
+                    },
+                )
+                .map_err(std::io::Error::other)?;
+            data.lock()
+                .unwrap()
+                .initialize_overlay()
+                .map_err(std::io::Error::other)?;
             tauri::WebviewWindowBuilder::new(
                 app,
                 "settings",
@@ -888,7 +815,7 @@ pub fn run() {
             thread::Builder::new()
                 .name("tapkin-animation".into())
                 .spawn(move || engine(engine_app, data, rx, origin, settings_path))?;
-            pet.show()?;
+            renderer.set_visible(true).map_err(std::io::Error::other)?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
                 let _ = start_listener(&handle);
@@ -900,26 +827,11 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            let app = window.app_handle();
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                if window.label() == "settings" {
+            // Normal settings-window lifecycle stays in the Tauri shell.
+            if window.label() == "settings" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
                     let _ = window.hide();
-                }
-                return;
-            }
-            if window.label() != "pet" {
-                return;
-            }
-            if let WindowEvent::Moved(position) = event {
-                if let Some(runtime) = app.try_state::<Runtime>() {
-                    let mut data = runtime.data.lock().unwrap();
-                    data.settings.window_position = Some(Position {
-                        x: position.x,
-                        y: position.y,
-                    });
-                    data.save_at = Some(runtime.origin.elapsed() + Duration::from_millis(250));
-                    let _ = runtime.tx.try_send(EngineEvent::Wake);
                 }
             }
         })
@@ -934,12 +846,7 @@ pub fn run() {
         if let tauri::RunEvent::Exit = event {
             if let Some(runtime) = handle.try_state::<Runtime>() {
                 runtime.listener.lock().unwrap().take();
-                let _ = runtime
-                    .data
-                    .lock()
-                    .unwrap()
-                    .settings
-                    .save(&runtime.settings_path);
+                let _ = flush_settings(&runtime);
                 let _ = runtime.tx.try_send(EngineEvent::Quit);
             }
         }
