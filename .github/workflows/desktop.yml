@@ -43,7 +43,7 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --locked
         working-directory: src-tauri
-      - run: pnpm run tauri build -- --bundles ${{ matrix.bundles }}
+      - run: pnpm run tauri build --bundles ${{ matrix.bundles }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
