@@ -1,5 +1,13 @@
 # PLAN.md — Tapkin v1
 
+## Implementation status — 2026-10-05
+
+The v1 functionality and overlay extraction are implemented in the reviewed code at `6dda6c5`. Tauri owns Settings, tray/menu and lifecycle; `TapkinApp` receives an `Arc<dyn OverlayRenderer>`, currently implemented by `TauriOverlayRenderer`. Native input uses CoreGraphics `CGEventTap` on macOS and `WH_KEYBOARD_LL` on Windows, normalized to `AnyKeyPressed`.
+
+The project uses pnpm 12.9.1, `pnpm-lock.yaml` and Node.js 22.12+. The bundled skin and app icons use the square-headed typing tabby pixel cat. Settings provides live size previews through `preview_size`; the completed slider adjustment is persisted through `update_settings`.
+
+The current macOS/Windows CI run passed checks, tests and installer builds: see [VALIDATION.md](VALIDATION.md) for the recorded run and pending manual desktop acceptance. [README.md](README.md) contains current usage/build commands; [ARCHITECTURE.md](ARCHITECTURE.md) describes the implemented boundaries. The phases below describe the implementation sequence, with remaining acceptance work distinguished from completed code.
+
 ## 0. Goal
 
 Build **Tapkin**, a lightweight cross-platform desktop character overlay in **Rust + Tauri 2**.
@@ -104,6 +112,7 @@ Use:
 - **Tauri 2**
 - Rust stable
 - minimal HTML/CSS/TypeScript frontend
+- pnpm 12.9.1, pinned in `package.json`, with `pnpm-lock.yaml`
 - no React/Vue/Svelte unless there is a concrete need
 
 The UI is intentionally tiny: one `<img>` plus a small settings surface.
@@ -112,21 +121,26 @@ The UI is intentionally tiny: one `<img>` plus a small settings surface.
 
 Create a platform abstraction.
 
-Initial implementation may use:
+The current implementations use:
 
-- `rdev` for macOS and Windows
+- macOS: a listen-only CoreGraphics `CGEventTap`
+- Windows: a native `WH_KEYBOARD_LL` hook via `windows-sys`
 
-But do **not** couple the rest of the app directly to `rdev`.
+Both stay behind the same project-owned interface. The implementation does not use `rdev`.
 
-Use an internal trait/interface so platform-specific implementations can replace it later.
-
-Concept:
+Current contract (`ActivitySink` and `FailureSink` are shared callbacks):
 
 ```rust
 pub trait InputBackend: Send + Sync {
-    fn start(&self, tx: Sender<InputEvent>) -> Result<()>;
+    fn start(
+        &self,
+        activity: ActivitySink,
+        failure: FailureSink,
+    ) -> Result<Box<dyn InputListener>, String>;
 }
 ```
+
+Startup returns only after the OS accepts the hook. Dropping the returned listener stops it; failures are reported to the shell, which exposes retry and permission guidance.
 
 Common event type for v1:
 
@@ -136,30 +150,9 @@ pub enum InputEvent {
 }
 ```
 
-Only emit the minimum semantic event needed by the animation engine. Key-specific events belong to v1.1.
+Only emit the minimum semantic event needed by the animation engine. Key-specific events belong to v1.1. Neither native hook reads a printable character or key code; the frontend receives frame/image and application-state data.
 
-Do not expose printable characters to the frontend.
-
-### macOS fallback
-
-If `rdev` proves unreliable on current macOS, implement the macOS backend with CoreGraphics `CGEventTap`.
-
-Possible crates:
-
-- `objc2`
-- CoreGraphics/CoreFoundation bindings appropriate for the current Rust ecosystem
-
-Keep this behind the same `InputBackend` abstraction.
-
-### Windows fallback
-
-If `rdev` is unreliable on Windows, implement:
-
-- `WH_KEYBOARD_LL`
-
-or another appropriate native global keyboard hook.
-
-Again, keep it behind `InputBackend`.
+Input flows through the existing bounded engine queue into `TapkinApp` and the animation state machine, then through `OverlayRenderer`. Native input callbacks do not manipulate windows.
 
 ---
 
@@ -258,7 +251,7 @@ Do not implement automatic cropping or pose alignment in v1.
 
 Implement animation logic in Rust as a small deterministic state machine.
 
-Suggested states for v1:
+Implemented states for v1:
 
 ```rust
 enum PetState {
@@ -293,6 +286,8 @@ typing_2
 ...
 ```
 
+Every key advances the logical index and extends the idle deadline. `frame_hold_ms` limits visual swaps during a burst without removing logical advances; the latest requested frame is displayed when the hold expires. Set it to zero for immediate swaps. Skin image index 0 is idle, and indexes 1 onward are typing frames.
+
 Do not animate continuously at a fixed FPS when the user is not pressing keys.
 
 The visual response should be tied to actual input.
@@ -308,9 +303,11 @@ The pet window must be:
 - always-on-top
 - hidden from normal app chrome where possible
 - draggable
-- resizeable through app controls or modifier + wheel
+- resizable through the Settings size slider, with live previews and a final persistent commit
 - aspect-ratio preserving
 - position persistent between launches
+
+The slider accepts widths from 64–800 logical pixels and preserves the skin aspect ratio, capping both dimensions at 800. Transient `preview_size` calls change only the renderer size; `update_settings` saves the completed adjustment and validates the position against current displays. The overlay boundary is defined in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Click-through
 
@@ -383,48 +380,59 @@ struct AppSettings {
 }
 ```
 
-Use a human-readable local format such as TOML or JSON.
+The current implementation uses human-readable `settings.json` in the Tauri application configuration directory, written through a flushed temporary file and atomic replacement. Position saves are debounced by 250 ms; shutdown captures the current renderer position before saving.
 
 Settings corruption must fall back to sane defaults.
 
 ---
 
-## 10. Suggested repository layout
+## 10. Current repository layout
 
 ```text
 tapkin/
 ├── PLAN.md
 ├── README.md
+├── ARCHITECTURE.md
+├── VALIDATION.md
 ├── LICENSE
 ├── package.json
+├── pnpm-lock.yaml
+├── pnpm-workspace.yaml
+├── vite.config.ts
+├── .github/workflows/desktop.yml
 ├── src/
 │   ├── index.html
 │   ├── main.ts
 │   └── style.css
 ├── src-tauri/
 │   ├── Cargo.toml
+│   ├── Cargo.lock
+│   ├── build.rs
 │   ├── tauri.conf.json
 │   ├── capabilities/
 │   ├── icons/
+│   ├── tests/overlay_contract.rs
 │   └── src/
 │       ├── main.rs
+│       ├── lib.rs
 │       ├── app.rs
+│       ├── core.rs
 │       ├── config.rs
 │       ├── skin.rs
 │       ├── state.rs
 │       ├── window.rs
+│       ├── overlay/
+│       │   ├── mod.rs
+│       │   └── tauri.rs
 │       └── input/
 │           ├── mod.rs
-│           ├── rdev_backend.rs
 │           ├── macos.rs
 │           └── windows.rs
-├── skins/
-│   └── example/
-│       ├── pet.toml
-│       ├── idle.png
-│       ├── typing_1.png
-│       └── typing_2.png
-└── tests/
+└── skins/example/
+    ├── pet.toml
+    ├── idle.png
+    ├── typing_1.png
+    └── typing_2.png
 ```
 
 Do not over-engineer modules if a simpler layout is clearer.
@@ -441,7 +449,7 @@ Responsibilities:
 - receive state/image-change events from Rust
 - apply image URL
 - expose drag region if required
-- settings UI
+- settings UI, including a coalesced live resize preview and final size commit
 
 Do not put keyboard-state logic in JavaScript.
 
@@ -454,9 +462,11 @@ global input
     ↓
 Rust InputBackend
     ↓
-Rust state machine
+Rust state machine / TapkinApp
     ↓
-Tauri event
+OverlayRenderer::show_frame
+    ↓
+TauriOverlayRenderer: targeted pet-frame event
     ↓
 frontend swaps <img src>
 ```
@@ -482,6 +492,8 @@ The frontend should never need raw keyboard events.
 
 ## 13. Implementation phases
 
+The code for Phases 1–8 is present. Native installer builds are passing in CI; GUI acceptance still needs the manual checks in [VALIDATION.md](VALIDATION.md).
+
 ### Phase 1 — Skeleton
 
 Create a Tauri 2 project that:
@@ -494,7 +506,7 @@ Create a Tauri 2 project that:
 
 Acceptance:
 
-- `cargo tauri dev` launches pet window successfully on macOS.
+- `pnpm run tauri dev` launches pet window successfully on macOS.
 
 ### Phase 2 — Skin loader
 
@@ -517,7 +529,7 @@ Before global hooks, add a temporary local input path to validate animation.
 
 Acceptance:
 
-- pressing keys while pet/settings window has focus alternates typing frames and returns to idle.
+- in development, focus the Settings local test button and press keys while the global listener is inactive; generic input alternates typing frames and returns to idle. The pet itself remains unfocusable.
 
 Remove or hide test-only code before release.
 
@@ -525,7 +537,7 @@ Remove or hide test-only code before release.
 
 Implement platform-neutral input interface.
 
-Start with `rdev`.
+The current implementation uses the native macOS/Windows hooks described in section 3, with explicit startup acknowledgment and failure/retry handling.
 
 Acceptance on macOS:
 
@@ -540,7 +552,7 @@ Acceptance on Windows:
 Implement:
 
 - alternating frames
-- debounce/sane repeated key handling
+- frame hold while counting each key press and extending the idle deadline
 - idle timeout
 Unit-test state transitions independently from global hooks.
 
@@ -611,6 +623,10 @@ Test settings:
 - invalid settings fallback
 - position validation
 
+### Renderer contract tests
+
+`src-tauri/tests/overlay_contract.rs` implements a non-Tauri test renderer and runs the actual injected core without a window. It covers frame alternation/hold/idle/reset, cached PNG bytes, settings application/rollback, successful and failed skin replacement, position-save deadlines/shutdown capture, and drag guards for lock/click-through. Run it with `cargo test --locked --test overlay_contract`.
+
 ### Manual integration matrix
 
 #### macOS
@@ -675,32 +691,32 @@ If the implementation ever starts tracking actual key values, update both behavi
 
 ## 17. Build and development commands
 
-Expected workflow should be documented in README.
-
-Typical commands:
+Use the package-manager version pinned in `package.json`. Current commands:
 
 ```bash
-npm install
-npm run tauri dev
-npm run tauri build
+pnpm ci
+pnpm run check
+pnpm run build
+pnpm run tauri dev
+pnpm run tauri build
 ```
 
 Also ensure Rust-only tests can run with:
 
 ```bash
 cd src-tauri
-cargo test
+cargo test --locked
 ```
 
-CI should at minimum run:
+The current CI runs:
 
 ```bash
 cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 ```
 
-and frontend checks appropriate to the chosen minimal toolchain.
+It also runs `pnpm ci`, `pnpm run build` and platform-specific Tauri builds. pnpm forwards the bundle option directly: `pnpm run tauri build --bundles app,dmg` on macOS or `pnpm run tauri build --bundles nsis` on Windows. The existing frontend build script and Tauri hooks invoke `npm run` internally, so npm remains required with Node.
 
 ---
 
@@ -716,12 +732,14 @@ Required:
 - frontend build
 - Tauri build smoke test where practical
 
-Recommended matrix:
+Implemented matrix:
 
 ```text
 macos-latest
 windows-latest
 ```
+
+The workflow runs on pushes to `main`, pull requests and manual dispatch. It uses `pnpm/setup@v3` with Node 22 and caching. Successful macOS DMG and Windows NSIS EXE uploads are named `tapkin-macos` and `tapkin-windows`, retained for 14 days. Signing/notarization and release publishing are not configured.
 
 Do not attempt Linux support in v1 merely because CI offers Linux runners.
 
@@ -799,9 +817,9 @@ When implementing this plan:
 
 ---
 
-## 22. First Codex task
+## 22. Original first Codex task (implemented)
 
-Start with **Phase 1 + Phase 2 only**.
+The initial task started with **Phase 1 + Phase 2 only**. This records the original sequence; implementation has since continued through Phase 8 and the overlay extraction.
 
 Deliver:
 
@@ -814,9 +832,7 @@ Deliver:
 - unit tests for skin configuration
 - README with development commands
 
-Do **not** implement global keyboard monitoring until the shell and skin format are working.
-
-After Phase 1 + 2 pass, continue with Phase 3 and Phase 4.
+The original sequence held global keyboard monitoring until the shell and skin format worked, then continued with Phases 3 and 4. The current native hooks are implemented; remaining release acceptance is tracked in [VALIDATION.md](VALIDATION.md).
 
 ---
 

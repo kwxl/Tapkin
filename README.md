@@ -8,39 +8,41 @@ Tauri owns Settings, tray/menu and application lifecycle. The floating pet is in
 
 ## Run and build
 
-Install Rust stable and Node.js **22.12+**, plus the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/):
+Install Rust stable, Node.js **22.12+** and **pnpm 12.9.1** (the version pinned by `package.json`), plus the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/):
 
 - macOS: Xcode Command Line Tools (`xcode-select --install`).
 - Windows: Visual Studio Build Tools with “Desktop development with C++” and Microsoft Edge WebView2 Runtime. WebView2 is already included with Windows 11; the installer can bootstrap it when missing, which requires an internet connection for that installation step.
 
 ```sh
-npm ci
-npm run tauri dev
+pnpm ci
+pnpm run tauri dev
 ```
 
 ```sh
-npm run tauri build
+pnpm run tauri build
 ```
+
+The repository uses `pnpm-lock.yaml`; `pnpm ci` installs from that lockfile. `pnpm-workspace.yaml` allows the esbuild dependency build. The existing frontend build script and Tauri pre-dev/pre-build hooks still invoke `npm run`, so keep npm available with your Node installation.
 
 Build on the destination OS. macOS outputs an `.app` and `.dmg` under `src-tauri/target/release/bundle`; Windows outputs an `.exe`, NSIS installer and MSI where the toolchain permits. To build only the supported installer used by CI:
 
 ```sh
 # macOS
-npm run tauri build -- --bundles app,dmg
+pnpm run tauri build --bundles app,dmg
 # Windows
-npm run tauri build -- --bundles nsis
+pnpm run tauri build --bundles nsis
 ```
 
-The GitHub Actions workflow in `.github/workflows/desktop.yml` runs formatting, Clippy, tests, the frontend build and installer builds on `macos-latest` and `windows-latest`. The workflow retains unsigned installers as artifacts and does not publish releases. Native builds use the runner's CPU architecture; use an Intel Mac or Apple Silicon Mac to build for that architecture.
+The GitHub Actions workflow in `.github/workflows/desktop.yml` runs on pushes to `main`, pull requests and manual dispatch. It uses `pnpm/setup@v3` with Node 22, `pnpm ci`, formatting, Clippy, tests, the frontend build and installer builds on `macos-latest` and `windows-latest`. It uploads the macOS DMG as `tapkin-macos` and the Windows NSIS EXE as `tapkin-windows`, retained for 14 days. The macOS build also creates an `.app`; the workflow uploads the DMG. The workflow does not publish releases. [Validation results](VALIDATION.md) include the latest reviewed successful run. Native builds use the runner's CPU architecture; use an Intel Mac or Apple Silicon Mac to build for that architecture.
 
-Development artifacts are unsigned and are not Apple notarized. macOS Gatekeeper or Windows SmartScreen may warn; verify the source/build and use the OS's normal trusted-app opening flow. Do not disable security protections. Signing/notarization can be added to distribution CI later.
+Development builds have no configured publisher signing or Apple notarization. macOS Gatekeeper or Windows SmartScreen may warn; verify the source/build and use the OS's normal trusted-app opening flow. Do not disable security protections. Signing/notarization can be added to distribution CI later.
 
 ## Use
 
 - Drag the pet with the left mouse button. Right-click it to open Settings.
 - Open Settings from the menu-bar icon (macOS) or notification-area icon (Windows). Windows may place the icon in the notification-area overflow.
 - Choose a skin folder, reload edited files, or open the current folder from Settings/the tray.
-- Resize using the Settings slider; image and window aspect ratios stay matched.
+- Resize using the Settings slider: the pet resizes live while you move it, with previews limited to about 30 requests per second. Releasing the slider or finishing a keyboard adjustment saves the final size. Image and window aspect ratios stay matched; both dimensions are capped at 800 logical pixels.
 - Always on Top, Click Through, Lock Position and Launch at Login are available in Settings and the tray.
 - **Click Through can always be turned off from the tray**, even when the pet no longer receives pointer input. Closing Settings hides it; Quit in the tray ends the app.
 - Window size and physical position survive relaunch. If a saved monitor is absent or the pet would be outside its display, it moves onto the primary display. macOS places it across Spaces where the window system permits.
@@ -62,7 +64,7 @@ Windows hook startup errors also appear in Settings with a Retry listener button
 
 ## Skins
 
-A skin is a local directory. The bundled `skins/example` contains original pixel-cat artwork. On first launch, its files are installed into the application's writable data directory; existing files are preserved. Choose another directory to use a custom skin.
+A skin is a local directory. The bundled `skins/example` contains a typing tabby pixel cat with a square head, on three transparent 256 × 256 PNG canvases; the app icons use the same character. On launch, missing example files are installed into the application's writable data directory; existing files are preserved. Updating the app therefore keeps an existing example copy, including its previous artwork. To use the new artwork in that case, choose a separate folder containing the current `skins/example` files. Choose another directory to use a custom skin.
 
 ```text
 my-cat/
@@ -98,15 +100,15 @@ The native backend abstraction uses a listen-only CoreGraphics `CGEventTap` on m
 ## Checks
 
 ```sh
-npm run check
-npm run build
+pnpm run check
+pnpm run build
 cd src-tauri
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 ```
 
-The tests exercise PNG/config validation and path confinement, deterministic animation/idle timing, settings recovery/atomic replacement and multiple-monitor position restoration. In `tauri dev`, Settings exposes a local test button: focus it and press keys while the global listener is inactive. It sends only a generic typing signal. This UI is hidden and the command is disabled in production.
+The tests exercise PNG/config validation and path confinement, deterministic animation/idle timing, settings recovery/atomic replacement, multiple-monitor position restoration and the injected core with a non-Tauri overlay renderer. The renderer contract suite runs with `cargo test --locked --test overlay_contract`. In `tauri dev`, Settings exposes a local test button: focus it and press keys while the global listener is inactive. It sends only a generic typing signal. This UI is hidden and the command is disabled in production.
 
 Linux can run Rust core unit tests and the frontend build; **Linux/Wayland desktop support is intentionally absent**. The binary reports an unsupported target there. See [VALIDATION.md](VALIDATION.md) for actual verification and the native manual acceptance checklist. An OS cross-check alone does not prove transparent windows, permissions or global hooks work on a physical desktop.
 
