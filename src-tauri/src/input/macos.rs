@@ -1,4 +1,7 @@
-use super::{ActivitySink, FailureSink, InputBackend, InputEvent, InputListener};
+use super::{
+    character_from_utf16, ActivitySink, FailureSink, InputBackend, InputEvent, InputListener,
+    KeyCode,
+};
 use std::{
     ffi::c_void,
     ptr,
@@ -28,6 +31,14 @@ extern "C" {
         info: *mut c_void,
     ) -> TapRef;
     fn CGEventTapEnable(tap: TapRef, enable: bool);
+    fn CGEventGetIntegerValueField(event: EventRef, field: u32) -> i64;
+    fn CGEventKeyboardGetUnicodeString(
+        event: EventRef,
+        max: usize,
+        actual: *mut usize,
+        text: *mut u16,
+    );
+    fn CGEventGetFlags(event: EventRef) -> u64;
 }
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
@@ -44,6 +55,7 @@ extern "C" {
 }
 
 const KEY_DOWN: u32 = 10;
+const KEY_UP: u32 = 11;
 const TAP_DISABLED_TIMEOUT: u32 = 0xffff_fffe;
 const TAP_DISABLED_USER: u32 = 0xffff_ffff;
 const PERMISSION_MESSAGE: &str = "Tapkin needs Input Monitoring permission to detect typing in other apps. It does not record or save what you type. Open System Settings → Privacy & Security → Input Monitoring, enable Tapkin, then choose Retry listener. If macOS requests an app relaunch, quit and reopen Tapkin. Accessibility may also be required if the event tap cannot be created.";
@@ -64,8 +76,44 @@ unsafe extern "C" fn callback(
 ) -> EventRef {
     let context = unsafe { &*(info as *const Context) };
     match kind {
-        KEY_DOWN => (context.activity)(InputEvent::AnyKeyPressed),
+        KEY_DOWN => {
+            // kCGKeyboardEventKeycode = 9; read only a bounded, transient character.
+            let code = unsafe { CGEventGetIntegerValueField(event, 9) };
+            let key = u32::try_from(code).ok().and_then(KeyCode::from_macos);
+            let mut text = [0_u16; 8];
+            let mut length = 0;
+            let flags = unsafe { CGEventGetFlags(event) };
+            // Command/Control shortcuts are not text; Shift/Option remain layout-aware.
+            let character = if flags & ((1 << 18) | (1 << 20)) == 0 {
+                unsafe {
+                    CGEventKeyboardGetUnicodeString(
+                        event,
+                        text.len(),
+                        &mut length,
+                        text.as_mut_ptr(),
+                    )
+                };
+                text.get(..length).and_then(character_from_utf16)
+            } else {
+                None
+            };
+            let repeat = unsafe { CGEventGetIntegerValueField(event, 8) } != 0;
+            if let Ok(id) = u32::try_from(code) {
+                (context.activity)(InputEvent::KeyDown {
+                    id,
+                    key,
+                    character,
+                    repeat,
+                });
+            }
+        }
+        KEY_UP => {
+            if let Ok(id) = u32::try_from(unsafe { CGEventGetIntegerValueField(event, 9) }) {
+                (context.activity)(InputEvent::KeyUp { id });
+            }
+        }
         TAP_DISABLED_TIMEOUT => unsafe {
+            (context.activity)(InputEvent::ResetKeys);
             CGEventTapEnable(context.tap, true);
         },
         TAP_DISABLED_USER => {
@@ -77,7 +125,7 @@ unsafe extern "C" fn callback(
         }
         _ => {}
     }
-    // Never inspect event contents; listen-only taps cannot modify input.
+    // Return the original event; the listen-only tap never modifies input.
     event
 }
 
@@ -125,8 +173,8 @@ impl InputBackend for MacInput {
         let worker = thread::Builder::new().name("tapkin-key-tap".into()).spawn(move || unsafe {
             let run_loop = CFRunLoopGetCurrent();
             let mut context = Box::new(Context { activity, failure, tap: ptr::null_mut(), run_loop, stopping: stop });
-            // Session event tap, head insertion, listen-only, key-down events only.
-            let tap = CGEventTapCreate(1, 0, 1, 1_u64 << KEY_DOWN, callback, (&mut *context as *mut Context).cast());
+            // Listen-only key-down/up events; never consume the user's input.
+            let tap = CGEventTapCreate(1, 0, 1, (1_u64 << KEY_DOWN) | (1_u64 << KEY_UP), callback, (&mut *context as *mut Context).cast());
             if tap.is_null() {
                 let _ = ready_tx.send(Err(PERMISSION_MESSAGE.to_string()));
                 return;

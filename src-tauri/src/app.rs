@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender},
         Arc, Mutex,
     },
@@ -32,6 +32,7 @@ struct Runtime {
     listener: Mutex<Option<Box<dyn InputListener>>>,
     generation: AtomicU64,
     mutations: Mutex<()>,
+    input_overflow: Arc<AtomicBool>,
 }
 enum EngineEvent {
     Key(InputEvent),
@@ -163,6 +164,16 @@ fn engine(
         {
             let mut data = data.lock().unwrap();
             let now = origin.elapsed();
+            if app
+                .state::<Runtime>()
+                .input_overflow
+                .swap(false, Ordering::AcqRel)
+            {
+                match data.reset_animation() {
+                    Ok(frame) => emit_preview(&app, frame),
+                    Err(error) => overlay_error = Some(error.to_string()),
+                }
+            }
             match event {
                 Some(EngineEvent::Quit) => break,
                 Some(EngineEvent::Key(event)) if data.input.active || cfg!(debug_assertions) => {
@@ -241,10 +252,14 @@ fn start_listener(app: &AppHandle) -> Result<(), String> {
     }
     let activity_tx = runtime.tx.clone();
     let failure_tx = runtime.tx.clone();
+    let input_overflow = Arc::clone(&runtime.input_overflow);
     let result = platform_backend().start(
         Arc::new(move |event| {
             // Never wait in an OS keyboard callback. Bound the queue under extreme input load.
-            let _ = activity_tx.try_send(EngineEvent::Key(event));
+            if activity_tx.try_send(EngineEvent::Key(event)).is_err() {
+                // A dropped release must never leave the pet stuck in hold mode.
+                input_overflow.store(true, Ordering::Release);
+            }
         }),
         Arc::new(move |message| {
             let _ = failure_tx.send(EngineEvent::Failed(generation, message));
@@ -311,6 +326,9 @@ fn sync_tray(app: &AppHandle) -> Result<(), String> {
 }
 #[derive(Default, Deserialize)]
 struct SettingsPatch {
+    repeat_held_keys: Option<bool>,
+    typing_timeout_ms: Option<u64>,
+    frame_hold_ms: Option<u64>,
     width: Option<f64>,
     always_on_top: Option<bool>,
     click_through: Option<bool>,
@@ -329,6 +347,18 @@ fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings,
         )
     };
     let mut settings = old.clone();
+    if let Some(value) = patch.repeat_held_keys {
+        settings.repeat_held_keys = value;
+    }
+    if let Some(value) = patch.typing_timeout_ms {
+        settings.typing_timeout_ms = value;
+    }
+    if let Some(value) = patch.frame_hold_ms {
+        settings.frame_hold_ms = value;
+    }
+    if !settings.valid_animation_timing() {
+        return Err("Typing timeout must be 50–10000 ms; frame hold must be 0–timeout ms".into());
+    }
     if let Some(width) = patch.width {
         if !width.is_finite() || !(64.0..=800.0).contains(&width) {
             return Err("Width must be 64–800 pixels".into());
@@ -364,6 +394,7 @@ fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings,
             .save(&runtime.settings_path)
             .map_err(|e| format!("Could not save settings: {e}"))?;
         data.settings = settings.clone();
+        data.apply_animation_timing();
         data.save_at = None;
         emit_settings(app, &mut data);
         Ok::<(), String>(())
@@ -381,6 +412,7 @@ fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings,
         let _ = sync_tray(app);
         return Err(error);
     }
+    let _ = runtime.tx.try_send(EngineEvent::Wake);
     sync_tray(app)?;
     Ok(settings)
 }
@@ -810,6 +842,7 @@ pub fn run() {
                 listener: Mutex::new(None),
                 generation: AtomicU64::new(0),
                 mutations: Mutex::new(()),
+                input_overflow: Arc::new(AtomicBool::new(false)),
             });
             renderer
                 .create_window(

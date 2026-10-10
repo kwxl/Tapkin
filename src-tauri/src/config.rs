@@ -15,6 +15,9 @@ pub struct AppSettings {
     pub click_through: bool,
     pub lock_position: bool,
     pub launch_at_login: bool,
+    pub typing_timeout_ms: u64,
+    pub frame_hold_ms: u64,
+    pub repeat_held_keys: bool,
 }
 
 impl Default for AppSettings {
@@ -30,11 +33,18 @@ impl Default for AppSettings {
             click_through: false,
             lock_position: false,
             launch_at_login: false,
+            typing_timeout_ms: 180,
+            frame_hold_ms: 60,
+            repeat_held_keys: true,
         }
     }
 }
 
 impl AppSettings {
+    pub fn valid_animation_timing(&self) -> bool {
+        (50..=10_000).contains(&self.typing_timeout_ms)
+            && self.frame_hold_ms <= self.typing_timeout_ms
+    }
     pub fn load(path: &Path) -> (Self, Option<String>) {
         match fs::read_to_string(path) {
             Ok(text) => match serde_json::from_str::<Self>(&text) {
@@ -53,9 +63,10 @@ impl AppSettings {
     }
 
     fn valid(&self) -> bool {
-        [self.window_size.width, self.window_size.height]
-            .iter()
-            .all(|n| n.is_finite() && *n > 0.0 && *n <= 800.0)
+        self.valid_animation_timing()
+            && [self.window_size.width, self.window_size.height]
+                .iter()
+                .all(|n| n.is_finite() && *n > 0.0 && *n <= 800.0)
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
@@ -103,5 +114,36 @@ mod tests {
         assert!(AppSettings::load(&path).0.click_through);
         fs::write(&path, r#"{"window_size":{"width":-1,"height":100}}"#).unwrap();
         assert!(AppSettings::load(&path).1.is_some());
+    }
+
+    #[test]
+    fn timing_defaults_round_trip_and_invalid_values_restore_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{}").unwrap();
+        let settings = AppSettings::load(&path).0;
+        assert_eq!(
+            (settings.typing_timeout_ms, settings.frame_hold_ms),
+            (180, 60)
+        );
+        assert!(settings.repeat_held_keys);
+        let settings = AppSettings {
+            typing_timeout_ms: 500,
+            frame_hold_ms: 100,
+            repeat_held_keys: false,
+            ..Default::default()
+        };
+        settings.save(&path).unwrap();
+        assert_eq!(AppSettings::load(&path).0, settings);
+        for (timeout, hold) in [(49, 0), (10001, 0), (180, 181)] {
+            let invalid = AppSettings {
+                typing_timeout_ms: timeout,
+                frame_hold_ms: hold,
+                ..Default::default()
+            };
+            assert!(!invalid.valid_animation_timing());
+            invalid.save(&path).unwrap();
+            assert!(AppSettings::load(&path).1.is_some());
+        }
     }
 }

@@ -8,7 +8,7 @@ use crate::{
     window::Position,
 };
 use serde::Serialize;
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 #[derive(Clone, Serialize)]
 pub struct InputStatus {
@@ -41,6 +41,7 @@ pub struct TapkinApp {
     pub(crate) warning: Option<String>,
     pub(crate) save_at: Option<Duration>,
     overlay: Arc<dyn OverlayRenderer>,
+    held_keys: BTreeSet<u32>,
 }
 
 impl TapkinApp {
@@ -52,8 +53,8 @@ impl TapkinApp {
     ) -> Self {
         let animation = Animation::new(
             skin.config.typing.len(),
-            skin.config.typing_timeout_ms,
-            skin.config.frame_hold_ms,
+            settings.typing_timeout_ms,
+            settings.frame_hold_ms,
         );
         Self {
             skin,
@@ -70,6 +71,7 @@ impl TapkinApp {
             warning,
             save_at: None,
             overlay,
+            held_keys: BTreeSet::new(),
         }
     }
 
@@ -78,6 +80,10 @@ impl TapkinApp {
     }
     pub fn settings(&self) -> &AppSettings {
         &self.settings
+    }
+    pub fn apply_animation_timing(&mut self) {
+        self.animation
+            .set_timing(self.settings.typing_timeout_ms, self.settings.frame_hold_ms);
     }
     pub fn input_status(&self) -> &InputStatus {
         &self.input
@@ -99,16 +105,65 @@ impl TapkinApp {
 
     pub fn on_input(
         &mut self,
-        _event: InputEvent,
+        event: InputEvent,
         now: Duration,
     ) -> OverlayResult<Option<FrameChange>> {
-        self.animation
-            .key(now)
-            .map(|index| self.present(index))
-            .transpose()
+        let event = match event {
+            InputEvent::ResetKeys => {
+                return self.reset_animation().map(Some);
+            }
+            InputEvent::KeyUp { id } => {
+                self.held_keys.remove(&id);
+                self.animation.set_held(
+                    !self.settings.repeat_held_keys && !self.held_keys.is_empty(),
+                    now,
+                );
+                return Ok(None);
+            }
+            InputEvent::KeyDown {
+                id,
+                key,
+                character,
+                repeat,
+            } => {
+                let first_press = self.held_keys.insert(id);
+                self.animation.set_held(
+                    !self.settings.repeat_held_keys && !self.held_keys.is_empty(),
+                    now,
+                );
+                if !self.settings.repeat_held_keys && (!first_press || repeat) {
+                    return Ok(None);
+                }
+                match character {
+                    Some(character) => InputEvent::CharacterPressed { key, character },
+                    None => key.map_or(InputEvent::AnyKeyPressed, InputEvent::KeyPressed),
+                }
+            }
+            event => event,
+        };
+        let mapped = match event {
+            InputEvent::AnyKeyPressed => None,
+            InputEvent::KeyPressed(key) => self.skin.mapped_frame(key),
+            InputEvent::CharacterPressed { key, character } => self
+                .skin
+                .mapped_character(character)
+                .or_else(|| key.and_then(|key| self.skin.mapped_frame(key))),
+            InputEvent::KeyDown { .. } | InputEvent::KeyUp { .. } | InputEvent::ResetKeys => {
+                unreachable!()
+            }
+        };
+        let frame = match mapped {
+            Some(index) => self.animation.key_frame(now, Some(index)),
+            None => self.animation.key(now),
+        };
+        frame.map(|index| self.present(index)).transpose()
     }
 
     pub fn tick(&mut self, now: Duration) -> OverlayResult<Option<FrameChange>> {
+        self.animation.set_held(
+            !self.settings.repeat_held_keys && !self.held_keys.is_empty(),
+            now,
+        );
         self.animation
             .tick(now)
             .map(|index| self.present(index))
@@ -116,6 +171,7 @@ impl TapkinApp {
     }
 
     pub fn reset_animation(&mut self) -> OverlayResult<FrameChange> {
+        self.held_keys.clear();
         self.animation.reset();
         self.present(0)
     }
@@ -145,9 +201,10 @@ impl TapkinApp {
         self.overlay.show_frame(&frame_ref(&skin, frame)?)?;
         self.animation = Animation::new(
             skin.config.typing.len(),
-            skin.config.typing_timeout_ms,
-            skin.config.frame_hold_ms,
+            settings.typing_timeout_ms,
+            settings.frame_hold_ms,
         );
+        self.held_keys.clear();
         self.skin = skin;
         self.settings = settings;
         self.revision = revision;

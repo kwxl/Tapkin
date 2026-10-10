@@ -1,6 +1,8 @@
+use crate::input::{single_character, KeyCode};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     fs,
     io::Cursor,
     path::{Component, Path, PathBuf},
@@ -14,22 +16,19 @@ const MAX_FRAMES: usize = 16;
 const MAX_SKIN_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CACHED_PIXELS: u64 = 16 * 1024 * 1024;
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MappingKey {
+    Physical(KeyCode),
+    Character(char),
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SkinConfig {
     pub name: String,
     pub idle: PathBuf,
     pub typing: Vec<PathBuf>,
-    #[serde(default = "default_timeout")]
-    pub typing_timeout_ms: u64,
-    #[serde(default = "default_hold")]
-    pub frame_hold_ms: u64,
-}
-
-fn default_timeout() -> u64 {
-    180
-}
-fn default_hold() -> u64 {
-    60
+    #[serde(default)]
+    pub key_mappings: BTreeMap<String, PathBuf>,
 }
 
 #[derive(Debug, Error)]
@@ -55,6 +54,7 @@ pub struct Skin {
     pub config: SkinConfig,
     pub view: SkinView,
     frames: Vec<Vec<u8>>,
+    key_frames: BTreeMap<MappingKey, usize>,
 }
 
 fn bounded_read(path: &Path, limit: u64) -> Result<Vec<u8>, SkinError> {
@@ -155,19 +155,30 @@ impl Skin {
                 "typing must contain 2–{MAX_FRAMES} PNG frames"
             )));
         }
-        if !(50..=10_000).contains(&config.typing_timeout_ms)
-            || config.frame_hold_ms > config.typing_timeout_ms
-        {
-            return Err(SkinError::Invalid(
-                "typing_timeout_ms must be 50–10000; frame_hold_ms must not exceed it".into(),
-            ));
-        }
-        let mut images = Vec::with_capacity(config.typing.len() + 1);
-        let mut frames = Vec::with_capacity(config.typing.len() + 1);
+        let mappings = config.key_mappings.iter().map(|(name, path)| {
+            KeyCode::parse(name).map(MappingKey::Physical)
+                .or_else(|| single_character(name).map(MappingKey::Character))
+                .map(|key| (key, path)).ok_or_else(|| {
+                SkinError::Invalid(format!("Unsupported key mapping '{name}'; use a physical key name such as KeyA or a single printable character such as '?'"))
+            })
+        }).collect::<Result<Vec<_>, _>>()?;
+        let mut images = Vec::new();
+        let mut frames = Vec::new();
+        let mut paths = BTreeMap::new();
+        let mut key_frames = BTreeMap::new();
         let mut canvas = None;
         let mut total_bytes = 0;
-        for relative in std::iter::once(&config.idle).chain(&config.typing) {
+        for (mapped, relative) in std::iter::once((None, &config.idle))
+            .chain(config.typing.iter().map(|path| (None, path)))
+            .chain(mappings.iter().map(|(key, path)| (Some(*key), *path)))
+        {
             let path = asset_path(&root, relative)?;
+            if let Some(key) = mapped {
+                if let Some(&index) = paths.get(&path) {
+                    key_frames.insert(key, index);
+                    continue;
+                }
+            }
             let bytes = bounded_read(&path, MAX_IMAGE_BYTES)?;
             total_bytes += bytes.len();
             if total_bytes > MAX_SKIN_BYTES {
@@ -176,8 +187,7 @@ impl Skin {
                 ));
             }
             let size = png_size(&bytes, relative)?;
-            if u64::from(size.0) * u64::from(size.1) * (config.typing.len() + 1) as u64
-                > MAX_CACHED_PIXELS
+            if u64::from(size.0) * u64::from(size.1) * (frames.len() + 1) as u64 > MAX_CACHED_PIXELS
             {
                 return Err(SkinError::Invalid(
                     "Skin frames exceed the 16-megapixel combined canvas budget".into(),
@@ -190,6 +200,11 @@ impl Skin {
                 )));
             }
             canvas = Some(size);
+            let index = frames.len();
+            paths.entry(path).or_insert(index);
+            if let Some(key) = mapped {
+                key_frames.insert(key, index);
+            }
             images.push(format!("data:image/png;base64,{}", STANDARD.encode(&bytes)));
             frames.push(bytes);
         }
@@ -204,12 +219,23 @@ impl Skin {
             },
             config,
             frames,
+            key_frames,
         })
     }
 
     /// Frames are returned from the validated load, even if files are edited before reload.
     pub fn frame_png(&self, index: usize) -> Option<&[u8]> {
         self.frames.get(index).map(Vec::as_slice)
+    }
+
+    pub fn mapped_frame(&self, key: KeyCode) -> Option<usize> {
+        self.key_frames.get(&MappingKey::Physical(key)).copied()
+    }
+
+    pub fn mapped_character(&self, character: char) -> Option<usize> {
+        self.key_frames
+            .get(&MappingKey::Character(character))
+            .copied()
     }
 }
 
@@ -262,7 +288,110 @@ mod tests {
         config(&root, "name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\nhappy='missing.png'");
         let skin = Skin::load(&root).unwrap();
         assert_eq!(skin.view.images.len(), 3);
-        assert_eq!(skin.config.typing_timeout_ms, 180);
+    }
+
+    #[test]
+    fn mappings_cache_shared_images_and_reuse_existing_frames() {
+        let dir = example();
+        let root = dir.path().join("example");
+        fs::copy(root.join("typing_1.png"), root.join("special.png")).unwrap();
+        config(&root, "name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\n[key_mappings]\nKeyA='special.png'\nKeyB='special.png'\nSpace='typing_2.png'\nEnter='idle.png'");
+        let skin = Skin::load(&root).unwrap();
+        assert_eq!(skin.view.images.len(), 4);
+        assert_eq!(skin.mapped_frame(KeyCode::parse("KeyA").unwrap()), Some(3));
+        assert_eq!(skin.mapped_frame(KeyCode::parse("KeyB").unwrap()), Some(3));
+        assert_eq!(skin.mapped_frame(KeyCode::parse("Space").unwrap()), Some(2));
+        assert_eq!(skin.mapped_frame(KeyCode::parse("Enter").unwrap()), Some(0));
+        assert_eq!(skin.mapped_frame(KeyCode::parse("KeyC").unwrap()), None);
+        fs::write(root.join("special.png"), b"bad edit").unwrap();
+        assert!(skin.frame_png(3).unwrap().starts_with(b"\x89PNG"));
+        assert!(Skin::load(&root).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_mapping_names_and_paths() {
+        let dir = example();
+        let root = dir.path().join("example");
+        for mapping in [
+            "AA='idle.png'",
+            "ShiftLeft='idle.png'",
+            "KeyA='../idle.png'",
+            "KeyA='/tmp/idle.png'",
+            "KeyA='missing.png'",
+            "KeyA='pet.toml'",
+        ] {
+            config(&root, &format!("name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\n[key_mappings]\n{mapping}"));
+            assert!(Skin::load(&root).is_err(), "accepted {mapping}");
+        }
+    }
+
+    #[test]
+    fn character_mappings_are_case_sensitive_and_share_the_cache() {
+        let dir = example();
+        let root = dir.path().join("example");
+        fs::copy(root.join("typing_1.png"), root.join("special.png")).unwrap();
+        config(&root, "name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\n[key_mappings]\n'?'='special.png'\n'!'='special.png'\n'a'='typing_1.png'\n'A'='typing_2.png'\n'😀'='special.png'\nSlash='typing_2.png'");
+        let skin = Skin::load(&root).unwrap();
+        assert_eq!(skin.view.images.len(), 4);
+        for character in ['?', '!', '😀'] {
+            assert_eq!(skin.mapped_character(character), Some(3));
+        }
+        assert_eq!(skin.mapped_character('a'), Some(1));
+        assert_eq!(skin.mapped_character('A'), Some(2));
+        assert_eq!(skin.mapped_character('/'), None);
+        assert_eq!(skin.mapped_frame(KeyCode::parse("Slash").unwrap()), Some(2));
+        for name in ["ab", "e\u{301}", "\n", ""] {
+            let quoted = toml::Value::String(name.into()).to_string();
+            config(&root, &format!("name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\n[key_mappings]\n{quoted}='idle.png'"));
+            assert!(Skin::load(&root).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_mapped_canvas_mismatch_and_combined_pixel_budget() {
+        let dir = example();
+        let root = dir.path().join("example");
+        let write_png = |name: &str, size: u32| {
+            let mut encoder =
+                png::Encoder::new(fs::File::create(root.join(name)).unwrap(), size, size);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&vec![0; (size * size * 4) as usize])
+                .unwrap();
+        };
+        write_png("special.png", 1);
+        config(&root, "name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\n[key_mappings]\nKeyA='special.png'");
+        assert!(Skin::load(&root)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("canvas size"));
+        for name in ["idle.png", "typing_1.png", "typing_2.png", "special.png"] {
+            write_png(name, 2100);
+        }
+        assert!(Skin::load(&root)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("canvas budget"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_mapped_symlink_escape() {
+        let dir = example();
+        let root = dir.path().join("example");
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("special.png")).unwrap();
+        config(&root, "name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\n[key_mappings]\nKeyA='special.png'");
+        assert!(Skin::load(&root)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("escapes"));
     }
 
     #[test]
@@ -322,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_mismatched_canvases_and_invalid_timings() {
+    fn rejects_mismatched_canvases_and_ignores_legacy_timings() {
         let dir = example();
         let root = dir.path().join("example");
         for timing in [
@@ -336,7 +465,7 @@ mod tests {
                     "name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\n{timing}"
                 ),
             );
-            assert!(Skin::load(&root).is_err());
+            assert!(Skin::load(&root).is_ok());
         }
         config(
             &root,
