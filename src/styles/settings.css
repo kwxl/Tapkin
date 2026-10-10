@@ -1,0 +1,157 @@
+/* Settings */
+#settings {
+  display: none;
+}
+.settings-view {
+  background: #faf9f6;
+  overflow-y: auto;
+}
+.settings-view #app {
+  display: none;
+}
+.settings-view #settings {
+  display: block;
+  max-width: 600px;
+  padding: 28px;
+  margin: 0 auto;
+}
+.brand {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+p {
+  font-size: var(--font-body);
+  line-height: 1.6;
+  color: #73717c;
+  margin: 0;
+}
+section {
+  border-top: var(--border-width) solid #e8e5df;
+  padding: 20px 0;
+}
+h1 {
+  font-size: 20px;
+  margin: 0;
+}
+h2 {
+  font-size: var(--font-label);
+  margin: 0 0 var(--space-4);
+}
+
+/* Skin */
+.skin-card {
+  display: flex;
+  align-items: center;
+  margin-top: 24px;
+  border-top: 0;
+  background: #f0ece4;
+  border-radius: 16px;
+  padding: var(--space-4);
+}
+/* Margins work even in WebViews that support grid gap but not flex gap. */
+.skin-card > * + * {
+  margin-left: var(--space-4);
+}
+.skin-card > div {
+  min-width: 0;
+}
+#preview {
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.path {
+  font-size: var(--font-caption);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+  margin: 4px 0 var(--space-3);
+  max-height: 56px;
+  overflow-y: auto;
+}
+
+/* Notices */
+.listener h2 {
+  color: #9b623e;
+  margin-bottom: var(--space-2);
+}
+.listener h2.active {
+  color: #3d765b;
+}
+#permission-message {
+  margin-bottom: var(--space-3);
+}
+#mac-permissions {
+  display: flex;
+  flex-wrap: wrap;
+  /* Child margins preserve spacing when the buttons wrap onto a new row. */
+  margin: 0 calc(-1 * var(--space-2)) 0 0;
+}
+#mac-permissions > * {
+  margin: var(--space-2) var(--space-2) 0 0;
+}
+.notice {
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
+  font-size: var(--font-body);
+  line-height: 1.5;
+  background: #fff0d6;
+  margin: var(--space-4) 0;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.error {
+  background: #fde9e5;
+  color: #953c35;
+}
+
+/* Footer */
+footer {
+  border-top: var(--border-width) solid #e8e5df;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--space-4);
+}
+footer div {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+footer a,
+footer span {
+  font-size: var(--font-caption);
+  color: #817d88;
+}
+footer .footer-credit {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+}
+footer .version {
+  margin-right: var(--space-3);
+  font-size: var(--font-caption);
+  color: #343344;
+  background: #eee9e1;
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-control);
+  letter-spacing: 0;
+}
+
+/* Development */
+/* Development-only test controls. Keep spacing scoped to this section. */
+#local-test {
+  font-size: var(--font-body);
+}
+#local-test > * + * {
+  margin-top: var(--space-3);
+}
+#test-input {
+  display: block;
+  width: 100%;
+  font: inherit;
+  padding: var(--space-3);
+}

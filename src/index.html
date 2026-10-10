@@ -6,33 +6,125 @@
     <title>Tapkin</title>
   </head>
   <body>
-    <main id="app"><img id="pet" alt="Tapkin desktop companion" draggable="false" /></main>
+    <main id="app">
+      <img id="pet" alt="Tapkin desktop companion" draggable="false" />
+    </main>
     <main id="settings">
-      <header><div class="brand">Tapkin <span>v1.0</span></div><p>A tiny companion for your typing days.</p></header>
+      <header>
+        <div class="brand">Tapkin</div>
+        <p>A tiny companion for your typing days.</p>
+      </header>
       <div id="error" class="notice error" role="alert" hidden></div>
       <div id="warning" class="notice" role="status" hidden></div>
       <section class="skin-card">
         <img id="preview" alt="Current skin preview" draggable="false" />
-        <div><h1 id="skin-name">Loading skin…</h1><p id="skin-path" class="path"></p><button id="choose-skin" class="primary">Choose skin folder…</button></div>
+        <div>
+          <h1 id="skin-name">Loading skin…</h1>
+          <p id="skin-path" class="path"></p>
+          <button id="choose-skin" class="primary">Choose skin folder…</button>
+        </div>
       </section>
-      <div class="skin-actions"><button id="reload">Reload skin</button><button id="open-folder">Open skin folder</button></div>
+      <div class="skin-actions">
+        <button id="reload">Reload skin</button
+        ><button id="open-folder">Open skin folder</button>
+      </div>
       <section>
         <h2>Desktop</h2>
-        <label class="size-label" for="width">Size <output id="size-value">240 × 240 px</output></label>
-        <input id="width" type="range" min="64" max="800" step="1" value="240" />
-        <label class="toggle"><span>Always on top</span><input id="always_on_top" type="checkbox" /></label>
-        <label class="toggle"><span>Click through<small>Turn off again from the tray menu.</small></span><input id="click_through" type="checkbox" /></label>
-        <label class="toggle"><span>Lock position</span><input id="lock_position" type="checkbox" /></label>
-        <label class="toggle"><span>Launch at login</span><input id="launch_at_login" type="checkbox" /></label>
+        <label class="size-label" for="width"
+          >Size <output id="size-value">240 × 240 px</output></label
+        >
+        <input
+          id="width"
+          type="range"
+          min="64"
+          max="800"
+          step="1"
+          value="240"
+        />
+        <label class="toggle"
+          ><span>Always on top</span><input id="always_on_top" type="checkbox"
+        /></label>
+        <label class="toggle"
+          ><span>Click through</span><input id="click_through" type="checkbox"
+        /></label>
+        <label class="toggle"
+          ><span>Lock position</span><input id="lock_position" type="checkbox"
+        /></label>
+        <label class="toggle"
+          ><span>Launch at login</span
+          ><input id="launch_at_login" type="checkbox"
+        /></label>
+      </section>
+      <section>
+        <h2>Animation</h2>
+        <div>
+          <label class="toggle"
+            ><span>Treat held keys as repeated presses</span
+            ><input id="repeat_held_keys" type="checkbox" checked
+          /></label>
+          <p>
+            Turn off to keep the current image while a key is held. The idle
+            timeout starts when all keys are released.
+          </p>
+        </div>
+        <form id="animation-timing">
+          <label class="toggle" for="typing_timeout_ms">
+            <span>Typing timeout (ms)</span>
+            <input
+              id="typing_timeout_ms"
+              type="number"
+              min="50"
+              max="10000"
+              step="1"
+              value="180"
+              required
+            />
+          </label>
+          <label class="toggle" for="frame_hold_ms">
+            <span>Frame hold (ms)</span>
+            <input
+              id="frame_hold_ms"
+              type="number"
+              min="0"
+              max="180"
+              step="1"
+              value="60"
+              required
+            />
+          </label>
+          <p>
+            Applies to every skin. Frame hold cannot exceed the typing timeout;
+            use 0 for immediate image changes.
+          </p>
+          <p id="timing-status" role="status" aria-live="polite"></p>
+        </form>
       </section>
       <section class="listener">
         <h2 id="input-status">Starting listener…</h2>
         <p id="permission-message"></p>
         <button id="retry">Retry listener</button>
-        <div id="mac-permissions" hidden><button id="input-permission">Input Monitoring settings</button><button id="accessibility-permission">Accessibility settings</button></div>
+        <div id="mac-permissions" hidden>
+          <button id="input-permission">Input Monitoring settings</button
+          ><button id="accessibility-permission">Accessibility settings</button>
+        </div>
       </section>
-      <section id="local-test" hidden><p>Local animation test (development only)</p><button id="test-input">Focus here, then press keys</button><p>When the global listener is inactive, this sends only a typing signal.</p></section>
-      <footer><span>Local. Private. No accounts.</span><button id="quit">Quit Tapkin</button></footer>
+      <section id="local-test" hidden>
+        <p>Local animation test (development only)</p>
+        <button id="test-input">Focus here, then press keys</button>
+        <p>
+          When the global listener is inactive, this sends only a typing signal.
+        </p>
+      </section>
+      <footer>
+        <div class="footer-credit">
+          <span class="version">v1.0</span>
+          <div>
+            <span>By kimkwxl, with Codex & Claude Code.</span>
+            <a href="https://github.com/kwxl/Tapkin">Source Code</a>
+          </div>
+        </div>
+        <button id="quit">Quit Tapkin</button>
+      </footer>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

@@ -1,0 +1,183 @@
+button {
+  font: inherit;
+  font-size: var(--font-body);
+  color: inherit;
+  padding: var(--space-2) var(--space-3);
+  background: #fff;
+  border: var(--border-width) solid #dedbd5;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+button:hover {
+  background: #f0ede7;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+button.primary {
+  background: #4c566b;
+  color: white;
+  border-color: #4c566b;
+}
+button.primary:hover {
+  background: #3d4658;
+}
+/* Keep keyboard focus visible when :focus-visible is not understood. */
+button:focus,
+input:focus {
+  outline: 2px solid #5e839c;
+  outline-offset: 4px;
+}
+@supports selector(:focus-visible) {
+  button:focus:not(:focus-visible),
+  input:focus:not(:focus-visible) {
+    outline: none;
+  }
+}
+.skin-actions {
+  display: flex;
+  padding: var(--space-3) 0 20px;
+}
+.skin-actions > * + * {
+  margin-left: var(--space-2);
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-label);
+  padding: var(--space-2) 0;
+  cursor: pointer;
+}
+.toggle > input {
+  flex-shrink: 0;
+  margin-left: var(--space-3);
+}
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  border: var(--border-width) solid #dedbd5;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+input[type="checkbox"]:hover {
+  border-color: #4c566b;
+}
+input[type="checkbox"]:checked {
+  background: #4c566b;
+  border-color: #4c566b;
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+input[type="text"],
+input:not([type]),
+input[type="number"] {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: var(--border-width) solid #dedbd5;
+  border-radius: var(--radius-control);
+  padding: var(--space-2) var(--space-3);
+  box-shadow: none;
+}
+input[type="text"]:hover,
+input:not([type]):hover,
+input[type="number"]:hover {
+  border-color: #b6b1a9;
+}
+/* Hide native spinner chrome; keyboard arrow stepping still works. */
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.size-label {
+  font-size: var(--font-label);
+  display: flex;
+  justify-content: space-between;
+}
+#animation-timing input[type="number"] {
+  width: 100px;
+  padding: var(--space-2) var(--space-2);
+}
+output {
+  color: #817d88;
+  font-size: var(--font-caption);
+}
+input[type="range"] {
+  display: block;
+  width: 100%;
+  height: 24px;
+  margin: var(--space-4) 0;
+  padding: 0;
+  accent-color: #4c566b;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"] {
+  --range-progress: 0%;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #dedbd5;
+  background: linear-gradient(
+    to right,
+    #4c566b 0%,
+    #4c566b var(--range-progress, 0%),
+    #dedbd5 var(--range-progress, 0%),
+    #dedbd5 100%
+  );
+}
+input[type="range"]::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 50%;
+  background: #4c566b;
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: #dedbd5;
+}
+input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: #4c566b;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: #4c566b;
+}

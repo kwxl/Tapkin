@@ -1,0 +1,54 @@
+/* Tokens */
+/* Only widely shared spacing, typography, and visual conventions.
+   One/two-use values and browser-specific geometry stay in component CSS. */
+:root {
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --font-caption: 11px;
+  --font-body: 12px;
+  --font-label: 13px;
+  --border-width: 1px;
+  --radius-control: 8px;
+}
+
+/* Base */
+:root {
+  font-family:
+    "Nunito",
+    ui-rounded,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  color: #343344;
+  color-scheme: light;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+html,
+body {
+  margin: 0;
+  background: transparent;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Pet */
+#app,
+#pet {
+  width: 100%;
+  height: 100%;
+}
+#pet {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-select: none;
+}
