@@ -4,6 +4,50 @@ Documentation reviewed on **2026-10-05** against code commit **`6dda6c5d7db07f91
 
 **Native release acceptance is still pending.** Native macOS/Windows builds and installer uploads have succeeded in CI; launching the installed app and checking desktop interactions, keyboard permissions and display behavior still require manual acceptance. This Linux workspace cannot perform those GUI checks.
 
+## Custom key-image extension — 2026-10-10
+
+Timing autosave follow-up: the manual save button is removed. Valid edits debounce
+for 400 ms; committed field changes flush immediately. Invalid edits cancel queued
+saves, and requests are serialized so stale completion cannot clear newer drafts.
+`node --test tests/autosave.test.mjs` passed four tests for debounce, serialization,
+cancellation/stale completion, and errors/retry. The frontend build/type check and
+all 41 Rust tests passed. Live Settings interaction still needs manual acceptance.
+
+Held-key option: repeat mode defaults on; disabling it suppresses auto-repeat and
+holds the image until the last observed release, followed by the idle timeout.
+Contract tests cover duplicate/native repeats, multiple simultaneous keys,
+unknown releases, re-presses, and reset. Manually verify the toggle persists,
+holding mapped/unmapped keys on both platforms, listener retry, and sleep/wake.
+Local validation passed 29 unit tests and 12 contract tests (41 total), Clippy,
+formatting, frontend TypeScript checking, and the production build. Windows
+compilation and live native hold/release acceptance remain pending.
+
+Animation timing now belongs to app Settings rather than skins. Local checks
+passed 29 unit tests and 9 contract tests, Clippy, and `npm run build`. Added tests
+cover settings defaults/persistence/invalid timing, recomputed active deadlines,
+and acceptance of ignored legacy skin timing fields. Manually verify saving both
+Animation controls, persistence after restart, and timing across skin switches.
+
+Character mapping follow-up: `cargo test --locked` passed 27 unit tests and 8
+overlay contract tests; Clippy passed. Coverage includes UTF-16 single-character
+validation, punctuation/case matching, character-over-physical precedence, cache
+reuse, frame hold, timeout, and reload. Native character translation remains a
+manual acceptance item: check Shift punctuation, Caps Lock, alternate layouts,
+AltGr, shortcuts, and unchanged dead-key/IME behavior on both operating systems.
+
+Local macOS checks for this extension passed: `cargo test --locked` (24 unit tests
+and 7 overlay contract tests), `cargo clippy --locked --all-targets -- -D warnings`,
+and `pnpm run build` (including TypeScript checking). Added coverage includes
+physical-key normalization, mapped frame selection/hold/timeout/reset, unmapped
+fallback, cache reuse, invalid mapping names and paths, mapped symlink/canvas
+validation, total pixel limits, and removal of mappings after skin replacement.
+
+Live native-hook acceptance and Windows compilation/runtime checks for this
+extension are still pending. On both platforms, manually check mapped and unmapped
+keys in another app, repeated presses, Enter versus numpad Enter, arrow keys
+versus numpad keys, alternate keyboard layouts, idle timeout, invalid reload,
+and skin switching. These checks do not require recording typed text.
+
 ## Current native CI evidence
 
 [Desktop checks and installers — run 37245677740](https://github.com/kwxl/Tapkin/actions/runs/37245677740) ran for `6dda6c5` on 2026-10-04/05 UTC. GitHub reports the run and both jobs as **completed / success**; job steps and uploaded-artifact metadata were inspected during this documentation review.
@@ -67,4 +111,4 @@ The current code retains the native hook implementations, settings schema and ev
 - [ ] Check sleep/wake, app relaunch and multiple monitors including mixed DPI and disconnected-display recovery.
 - [ ] Confirm low idle CPU in Task Manager.
 
-v1 intentionally has no Linux desktop backend, network features, key mappings, text history, reactions, audio, updater or animation editor. Secure input fields and exclusive full-screen windows may restrict hooks/overlays; the implementation does not bypass OS protections.
+The app intentionally has no Linux desktop backend, network features, text history, reactions, audio, updater or animation editor. Per-skin single-key image mappings are supported; modifier-only mappings and shortcut combinations are not. Secure input fields and exclusive full-screen windows may restrict hooks/overlays; the implementation does not bypass OS protections.

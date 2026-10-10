@@ -1,5 +1,11 @@
 name = "Pixel Cat"
 idle = "idle.png"
 typing = ["typing_1.png", "typing_2.png"]
-typing_timeout_ms = 180
-frame_hold_ms = 60
+
+# Optional: uncomment to show a specific image for a physical key.
+# Unmapped keys keep cycling typing frames. Timing is controlled in app Settings.
+# [key_mappings]
+# KeyA = "typing_1.png"
+# Space = "typing_2.png"
+# "?" = "typing_1.png"
+# "!" = "typing_2.png"

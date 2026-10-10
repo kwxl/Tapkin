@@ -150,7 +150,7 @@ pub enum InputEvent {
 }
 ```
 
-Only emit the minimum semantic event needed by the animation engine. Key-specific events belong to v1.1. Neither native hook reads a printable character or key code; the frontend receives frame/image and application-state data.
+Only emit the minimum semantic event needed by the animation engine. Custom image mappings accept physical positions and single printable characters as transient Rust events. Native hooks translate a bounded single character but do not accumulate text; the frontend receives frame/image and application-state data, not key identities or characters.
 
 Input flows through the existing bounded engine queue into `TapkinApp` and the animation state machine, then through `OverlayRenderer`. Native input callbacks do not manipulate windows.
 

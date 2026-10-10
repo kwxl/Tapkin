@@ -11,7 +11,7 @@ Tapkin
 │   └── constructs TauriOverlayRenderer (overlay/tauri.rs)
 └── Core
     ├── TapkinApp (core.rs): injected Arc<dyn OverlayRenderer>
-    ├── InputBackend (input/): native hooks → AnyKeyPressed
+    ├── InputBackend (input/): native hooks → CharacterPressed / KeyPressed / AnyKeyPressed
     ├── SkinManager responsibility (skin.rs): parse / validate / cache PNGs
     ├── SettingsStore responsibility (config.rs): validate / load / save
     ├── Animation (state.rs): select frames / hold / idle timeout
@@ -43,7 +43,25 @@ pub trait OverlayRenderer: Send + Sync {
 
 ## Presentation and settings flow
 
-The existing native input hooks emit only `AnyKeyPressed` to the existing bounded engine channel. They do not call a window API. `TapkinApp` drives the existing animation state machine, requests `show_frame`, and returns neutral frame metadata for the shell's Settings preview. Idle remains event/deadline driven, without a polling render loop.
+Animation timeout and frame hold are client-wide `AppSettings` values persisted
+in `settings.json`. Settings validates and saves both before applying timing to
+the Rust animation and waking the deadline-driven engine. Active deadlines are
+recomputed without resetting the frame. Skin replacements retain client timing;
+legacy timing fields in `pet.toml` are ignored.
+The Settings frontend autosaves valid timing drafts after a 400 ms pause (or on
+committed field change), preserves drafts during settings events, and serializes
+writes through the dependency-free `src/shared/autosave.ts` helper. Invalid drafts are
+not persisted, and save failures remain visible without discarding the draft.
+
+The client-wide `repeat_held_keys` preference defaults to true. Native key-down/up
+events carry a transient physical ID; the core tracks only currently held IDs.
+With repeats disabled, duplicate/autorepeat downs do not advance animation, and
+idle expiry is suspended until all tracked keys are released. Pending frame-hold
+swaps still execute. Listener resets and skin replacement clear held state; a
+nonblocking queue-overflow flag resets animation to avoid a stuck hold after a
+dropped release. No held-key state is persisted or emitted to the frontend.
+
+Native input hooks normalize physical positions and a bounded single printable character into transient Rust events on the existing bounded engine channel. Character translation is best-effort, not IME/committed-text observation. Optional per-skin `key_mappings` resolve to cached frame indexes; shared mapped files reuse their cache entry. Character mappings take priority, followed by physical mappings and the regular typing cycle. `TapkinApp` retains hold/idle deadlines and returns neutral frame metadata for Settings. Neither key identities nor characters are emitted to the frontend or saved as history. Idle remains event/deadline driven, without a polling render loop.
 
 `TauriOverlayRenderer` sends a targeted `pet-frame` event to the pet WebView. It encodes/sends each PNG once per skin revision, then emits small frame metadata for subsequent swaps. The existing frontend continues to cache images and update the `<img>` source. Its initial IPC snapshot also supplies all cached images, covering events sent before listeners are ready and WebView reloads.
 
@@ -56,7 +74,7 @@ slider input → coalesced preview_size(width) → OverlayRenderer::set_size
 slider change → update_settings({ width }) → apply settings / restore position / save / notify
 ```
 
-`src/main.ts` updates the displayed dimensions immediately, coalesces pending widths and limits preview requests to about 30 per second, with one resize operation in flight. A final commit is queued behind an in-flight preview. `preview_size` validates a finite width in 64–800, applies the shared `aspect_size` calculation and calls the injected renderer outside the core-state mutex. It does not update `AppSettings`, save JSON, restore position or emit a settings event. `update_settings` performs those persistent operations when the slider change completes. A failed preview reports an error and queues a restore to the saved width when no newer resize is pending.
+`src/settings/index.ts` updates the displayed dimensions immediately, coalesces pending widths and limits preview requests to about 30 per second, with one resize operation in flight. A final commit is queued behind an in-flight preview. `preview_size` validates a finite width in 64–800, applies the shared `aspect_size` calculation and calls the injected renderer outside the core-state mutex. It does not update `AppSettings`, save JSON, restore position or emit a settings event. `update_settings` performs those persistent operations when the slider change completes. A failed preview reports an error and queues a restore to the saved width when no newer resize is pending.
 
 The shared frontend's overlay-event adapter remains an implementation detail of the current renderer. Live resizing is a shell command using the existing `set_size` contract; it adds no renderer method or core animation state.
 
@@ -66,7 +84,10 @@ The shared frontend's overlay-event adapter remains an implementation detail of 
 | --- | --- |
 | `overlay/tauri.rs` | Own/create the transparent pet window, emit its frame events, apply topmost/click-through/drag/geometry and monitor recovery. |
 | `app.rs` | Bootstrap/inject the renderer, manage normal Settings windows, persistent settings and transient `preview_size` commands, tray/menu, app data/resource paths, login integration and lifecycle. |
-| `src/main.ts` | Existing Tauri Settings commands/dialogs/events and the current WebView overlay adapter. |
+| `src/main.ts` | Minimal frontend entry: font, styles, and shared application bootstrap. |
+| `src/shared/` | IPC types, DOM helpers, autosave, application events, cached frame rendering, and pet interactions. |
+| `src/settings/index.ts` | Settings rendering/commands, timing autosave, and live resize controls. |
+| `src/styles/` | Three stylesheets: base/shared dimensions and pet, form controls, and Settings sections. |
 | `build.rs`, Tauri config/capabilities and shell plugins | Existing app packaging, permissions and platform integration. |
 
 A future macOS/Windows native overlay implements this same contract and is constructed/injected at bootstrap. Skin parsing, frame selection, input normalization, settings schema and Settings UI can remain as they are. Its OS-specific image/window/event-loop setup belongs inside that implementation. There is no native renderer, registry or runtime switching in this change.
