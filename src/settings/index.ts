@@ -48,6 +48,9 @@ export function initializeSettings({ getView, error }: {
       : view.input.active
         ? "Listening for typing"
         : "Keyboard listener inactive";
+    const login = field<HTMLInputElement>("launch_at_login");
+    login.disabled = view.portable;
+    login.title = view.portable ? "Unavailable in portable mode" : "";
     field("input-status").classList.toggle("active", view.input.active);
     field("permission-message").textContent =
       view.input.message ??

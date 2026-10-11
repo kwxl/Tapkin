@@ -63,11 +63,18 @@ jobs:
           New-Item -ItemType Directory -Path $portable -Force | Out-Null
           Copy-Item "src-tauri/target/release/tapkin.exe" "$portable/Tapkin.exe"
           Copy-Item "LICENSE" "$portable/LICENSE"
+          Copy-Item "portable/portable.json" "$portable/portable.json"
+          Copy-Item "portable/settings.json" "$portable/settings.json"
+          Copy-Item "portable/README.md" "$portable/PORTABLE.md"
+          Copy-Item "skins" "$portable/skins" -Recurse
           @"
           Extract this archive and run Tapkin.exe. No Tapkin installation is required.
           Microsoft Edge WebView2 Runtime must already be installed.
-          Settings and skins are stored in the normal per-user application data directory,
-          not beside the executable. This is an installation-free build, not isolated storage.
+          portable.json enables portable storage. Keep it beside Tapkin.exe.
+          Settings, bundled skins and WebView data are stored in this folder.
+          Move the entire folder to keep your settings and bundled skins.
+          Extract to a writable folder before running. Launch at login is disabled.
+          Skins selected outside this folder must be moved separately.
           "@ | Set-Content "$portable/README.txt"
           Compress-Archive -Path "$portable/*" -DestinationPath "src-tauri/target/release/tapkin-windows-portable.zip" -Force
       - name: Upload Windows portable build

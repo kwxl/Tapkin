@@ -1,0 +1,12 @@
+{
+  "selected_skin": "skins/example",
+  "window_position": null,
+  "window_size": { "width": 240.0, "height": 240.0 },
+  "always_on_top": true,
+  "click_through": false,
+  "lock_position": false,
+  "launch_at_login": false,
+  "typing_timeout_ms": 180,
+  "frame_hold_ms": 60,
+  "repeat_held_keys": true
+}

@@ -46,9 +46,10 @@ impl TauriOverlayRenderer {
         &self,
         size: Size,
         always_on_top: bool,
+        data_directory: Option<std::path::PathBuf>,
         on_moved: impl Fn(Position) + Send + Sync + 'static,
     ) -> OverlayResult {
-        let window = tauri::WebviewWindowBuilder::new(
+        let mut builder = tauri::WebviewWindowBuilder::new(
             &self.app,
             "pet",
             tauri::WebviewUrl::App("index.html".into()),
@@ -63,9 +64,11 @@ impl TauriOverlayRenderer {
         .skip_taskbar(true)
         .focusable(false)
         .focused(false)
-        .visible(false)
-        .build()
-        .map_err(|e| operation("create window", e))?;
+        .visible(false);
+        if let Some(directory) = data_directory {
+            builder = builder.data_directory(directory);
+        }
+        let window = builder.build().map_err(|e| operation("create window", e))?;
         #[cfg(target_os = "macos")]
         window
             .set_visible_on_all_workspaces(true)

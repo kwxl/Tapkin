@@ -4,6 +4,7 @@ use crate::{
     input::{platform_backend, InputEvent, InputListener},
     overlay::{tauri::TauriOverlayRenderer, OverlayRenderer},
     skin::{install_example, Skin, SkinView},
+    storage::Storage,
     window::{aspect_size, Position},
 };
 use serde::{Deserialize, Serialize};
@@ -28,7 +29,7 @@ use tauri_plugin_opener::OpenerExt;
 struct Runtime {
     data: Arc<Mutex<TapkinApp>>,
     tx: SyncSender<EngineEvent>,
-    settings_path: PathBuf,
+    storage: Storage,
     listener: Mutex<Option<Box<dyn InputListener>>>,
     generation: AtomicU64,
     mutations: Mutex<()>,
@@ -44,6 +45,7 @@ enum EngineEvent {
 
 #[derive(Serialize)]
 struct View {
+    portable: bool,
     skin: SkinView,
     settings: AppSettings,
     frame: usize,
@@ -142,7 +144,7 @@ fn engine(
     data: Arc<Mutex<TapkinApp>>,
     rx: Receiver<EngineEvent>,
     origin: Instant,
-    settings_path: PathBuf,
+    storage: Storage,
 ) {
     loop {
         let deadline = data.lock().unwrap().next_deadline();
@@ -208,7 +210,7 @@ fn engine(
             }
             if data.save_at.is_some_and(|at| now >= at) {
                 data.save_at = None;
-                if let Err(e) = data.settings.save(&settings_path) {
+                if let Err(e) = storage.save(&data.settings) {
                     save_error = Some(format!("Could not save window position: {e}"));
                 }
             }
@@ -295,6 +297,7 @@ fn start_listener(app: &AppHandle) -> Result<(), String> {
 fn get_view(runtime: tauri::State<'_, Runtime>) -> View {
     let data = runtime.data.lock().unwrap();
     View {
+        portable: runtime.storage.portable_root.is_some(),
         skin: data.skin.view.clone(),
         settings: data.settings.clone(),
         frame: data.frame,
@@ -375,6 +378,9 @@ fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings,
         settings.lock_position = v;
     }
     if let Some(v) = patch.launch_at_login {
+        if v && runtime.storage.portable_root.is_some() {
+            return Err("Launch at login is unavailable in portable mode".into());
+        }
         settings.launch_at_login = v;
     }
     let result = (|| {
@@ -390,8 +396,9 @@ fn change_settings(app: &AppHandle, patch: SettingsPatch) -> Result<AppSettings,
             .map_err(|e| e.to_string())?;
         }
         let mut data = runtime.data.lock().unwrap();
-        settings
-            .save(&runtime.settings_path)
+        runtime
+            .storage
+            .save(&settings)
             .map_err(|e| format!("Could not save settings: {e}"))?;
         data.settings = settings.clone();
         data.apply_animation_timing();
@@ -464,8 +471,9 @@ fn change_skin(app: &AppHandle, directory: PathBuf) -> Result<(), String> {
         settings.window_position =
             Some(apply_overlay_settings(overlay.as_ref(), &settings).map_err(|e| e.to_string())?);
         let mut data = runtime.data.lock().unwrap();
-        settings
-            .save(&runtime.settings_path)
+        runtime
+            .storage
+            .save(&settings)
             .map_err(|e| format!("Could not save skin selection: {e}"))?;
         saved = true;
         let update = data
@@ -487,7 +495,7 @@ fn change_skin(app: &AppHandle, directory: PathBuf) -> Result<(), String> {
     if let Err(mut error) = result {
         let _ = restore_overlay_settings(overlay.as_ref(), &old);
         if saved {
-            if let Err(save_error) = old.save(&runtime.settings_path) {
+            if let Err(save_error) = runtime.storage.save(&old) {
                 error.push_str(&format!(
                     "; could not restore previous settings: {save_error}"
                 ));
@@ -592,8 +600,9 @@ fn flush_settings(runtime: &Runtime) -> Result<(), String> {
     if let Ok(position) = &position {
         data.settings.window_position = Some(*position);
     }
-    data.settings
-        .save(&runtime.settings_path)
+    runtime
+        .storage
+        .save(&data.settings)
         .map_err(|e| e.to_string())?;
     position.map(|_| ())
 }
@@ -661,7 +670,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         app,
         "login",
         "Launch at Login",
-        true,
+        app.state::<Runtime>().storage.portable_root.is_none(),
         settings.launch_at_login,
         None::<&str>,
     )?;
@@ -793,10 +802,17 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            let data_dir = app.path().app_data_dir()?;
-            let settings_path = app.path().app_config_dir()?.join("settings.json");
+            let storage = Storage::discover(
+                &std::env::current_exe()?,
+                cfg!(target_os = "windows"),
+                app.path().app_data_dir()?,
+                app.path().app_config_dir()?.join("settings.json"),
+            )?;
+            let data_dir = &storage.data_dir;
+            let settings_path = &storage.settings_path;
             let example = install_example(&data_dir.join("skins"))?;
-            let (mut settings, mut warning) = AppSettings::load(&settings_path);
+            let (mut settings, mut warning) = AppSettings::load(settings_path);
+            settings.selected_skin = storage.resolve_skin(&settings.selected_skin);
             let selected = if settings.selected_skin.as_os_str().is_empty() {
                 &example
             } else {
@@ -819,11 +835,16 @@ pub fn run() {
                 settings.window_size.width,
                 (skin.view.width, skin.view.height),
             );
-            match app.autolaunch().is_enabled() {
-                Ok(enabled) => settings.launch_at_login = enabled,
-                Err(error) => {
-                    settings.launch_at_login = false;
-                    warning = Some(format!("Could not check launch-at-login: {error}"));
+            if storage.portable_root.is_some() {
+                settings.launch_at_login = false;
+                storage.save(&settings)?;
+            } else {
+                match app.autolaunch().is_enabled() {
+                    Ok(enabled) => settings.launch_at_login = enabled,
+                    Err(error) => {
+                        settings.launch_at_login = false;
+                        warning = Some(format!("Could not check launch-at-login: {error}"));
+                    }
                 }
             }
             let renderer = Arc::new(TauriOverlayRenderer::new(app.handle().clone()));
@@ -838,7 +859,7 @@ pub fn run() {
             app.manage(Runtime {
                 data: Arc::clone(&data),
                 tx: tx.clone(),
-                settings_path: settings_path.clone(),
+                storage: storage.clone(),
                 listener: Mutex::new(None),
                 generation: AtomicU64::new(0),
                 mutations: Mutex::new(()),
@@ -848,6 +869,7 @@ pub fn run() {
                 .create_window(
                     settings.window_size,
                     settings.always_on_top,
+                    storage.webview_data(),
                     move |position| {
                         let _ = tx.try_send(EngineEvent::Moved(position));
                     },
@@ -857,7 +879,7 @@ pub fn run() {
                 .unwrap()
                 .initialize_overlay()
                 .map_err(std::io::Error::other)?;
-            tauri::WebviewWindowBuilder::new(
+            let mut settings_window = tauri::WebviewWindowBuilder::new(
                 app,
                 "settings",
                 tauri::WebviewUrl::App("index.html?view=settings".into()),
@@ -865,13 +887,16 @@ pub fn run() {
             .title("Tapkin Settings")
             .inner_size(480.0, 650.0)
             .min_inner_size(380.0, 500.0)
-            .visible(false)
-            .build()?;
+            .visible(false);
+            if let Some(directory) = storage.webview_data() {
+                settings_window = settings_window.data_directory(directory);
+            }
+            settings_window.build()?;
             build_tray(app.handle())?;
             let engine_app = app.handle().clone();
             thread::Builder::new()
                 .name("tapkin-animation".into())
-                .spawn(move || engine(engine_app, data, rx, origin, settings_path))?;
+                .spawn(move || engine(engine_app, data, rx, origin, storage))?;
             renderer.set_visible(true).map_err(std::io::Error::other)?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || {

@@ -23,6 +23,7 @@ export type InputStatus = {
   message: string | null;
 };
 export type View = {
+  portable: boolean;
   skin: Skin;
   settings: Settings;
   frame: number;
