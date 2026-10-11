@@ -36,6 +36,16 @@ test("tokens load before component styles", () => {
   assert.ok(entry.indexOf('./styles/controls.css') < entry.indexOf('./styles/settings.css'));
 });
 
+test("radio controls match existing control colors and support disabled and checked states", () => {
+  const css = readFileSync(new URL("controls.css", directory), "utf8");
+  assert.match(css, /input\[type="radio"\]\s*\{[^}]*appearance: none;[^}]*border: var\(--border-width\) solid #dedbd5;[^}]*border-radius: 50%;[^}]*background: #fff;/);
+  assert.match(css, /input\[type="radio"\]:checked\s*\{\s*background: #4c566b;/);
+  assert.match(css, /input\[type="radio"\]:checked::after\s*\{[^}]*background: #fff;/);
+  assert.match(css, /input\[type="radio"\]:disabled\s*\{[^}]*cursor: not-allowed;/);
+  assert.match(css, /input:focus\s*\{\s*outline: 2px solid #5e839c;/);
+  assert.match(css, /input\[type="radio"\]:focus\s*\{\s*outline: none;/);
+});
+
 test("the variable UI font covers body, headings, and brand weights", () => {
   const entry = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   const settings = readFileSync(new URL("settings.css", directory), "utf8");

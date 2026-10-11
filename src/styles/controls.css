@@ -85,6 +85,41 @@ input[type="checkbox"]:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  vertical-align: middle;
+  border: var(--border-width) solid #dedbd5;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+input[type="radio"]:hover:not(:disabled) {
+  border-color: #4c566b;
+}
+input[type="radio"]:focus {
+  outline: none;
+}
+input[type="radio"]:checked {
+  background: #4c566b;
+  border-color: #4c566b;
+}
+input[type="radio"]:checked::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+}
+input[type="radio"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 input[type="text"],
 input:not([type]),
 input[type="number"] {
