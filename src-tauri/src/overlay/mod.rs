@@ -2,7 +2,7 @@
 use crate::window::{Position, Size};
 use thiserror::Error;
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub mod tauri;
 
 pub type OverlayResult<T = ()> = Result<T, OverlayError>;

@@ -94,12 +94,14 @@ pub trait InputBackend: Send + Sync {
     ) -> Result<Box<dyn InputListener>, String>;
 }
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub fn platform_backend() -> Box<dyn InputBackend> {
     #[cfg(target_os = "macos")]
     {
@@ -108,5 +110,9 @@ pub fn platform_backend() -> Box<dyn InputBackend> {
     #[cfg(target_os = "windows")]
     {
         Box::new(windows::WindowsInput)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(linux::LinuxInput)
     }
 }

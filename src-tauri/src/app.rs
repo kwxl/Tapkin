@@ -552,7 +552,7 @@ fn open_privacy_settings(app: AppHandle, section: String) -> Result<(), String> 
             )
             .map_err(|e| e.to_string())
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = (app, section);
         Err("Privacy settings shortcuts are available on macOS".into())
