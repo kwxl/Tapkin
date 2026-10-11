@@ -82,7 +82,7 @@ jobs:
           Settings, bundled skins and WebView data are stored in this folder.
           Move the entire folder to keep your settings and bundled skins.
           Extract to a writable folder before running. Launch at login is disabled.
-          Skins selected outside this folder must be moved separately.
+          Put new skin folders directly inside skins/. External skins cannot be selected.
           "@ | Set-Content "$portable/README.txt"
           Compress-Archive -Path "$portable/*" -DestinationPath "src-tauri/target/release/tapkin-windows-portable.zip" -Force
       - name: Upload Windows portable build

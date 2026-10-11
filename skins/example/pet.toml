@@ -2,6 +2,13 @@ name = "Pixel Cat"
 idle = "idle.png"
 typing = ["typing_1.png", "typing_2.png"]
 
+# Optional author metadata. Links use TOML's equals syntax, not JSON colons.
+# [author]
+# name = "Your name"
+# [author.links]
+# "X" = "https://x.com/your_handle"
+# "Instagram" = "https://www.instagram.com/your_handle/"
+
 # Optional: uncomment to show a specific image for a physical key.
 # Unmapped keys keep cycling typing frames. Timing is controlled in app Settings.
 # [key_mappings]

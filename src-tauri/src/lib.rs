@@ -3,6 +3,7 @@ pub mod core;
 pub mod input;
 pub mod overlay;
 pub mod skin;
+pub mod skin_repository;
 pub mod state;
 pub mod storage;
 pub mod window;

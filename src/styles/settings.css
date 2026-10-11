@@ -59,6 +59,7 @@ h2 {
 }
 .skin-card > div {
   min-width: 0;
+  flex: 1;
 }
 #preview {
   width: 108px;
@@ -77,6 +78,121 @@ h2 {
 }
 
 /* Notices */
+#skin-author {
+  margin: 4px 0 var(--space-3);
+  display: flex;
+  align-items: center;
+  height: 24px;
+  min-width: 0;
+}
+#skin-author.empty {
+  visibility: hidden;
+}
+#skin-author-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#skin-author-links {
+  display: flex;
+  align-items: center;
+  column-gap: 8px;
+  flex: 1;
+  min-width: 0;
+  margin-left: var(--space-2);
+}
+#skin-author-links > a,
+#skin-author-more {
+  flex-shrink: 0;
+}
+#skin-author-links a {
+  color: #4c566b;
+  font-size: var(--font-body);
+  white-space: nowrap;
+}
+#skin-author-more {
+  position: relative;
+  max-width: 100%;
+  font-size: var(--font-body);
+  color: #4c566b;
+}
+#skin-author-more summary {
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#skin-author-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 2;
+  width: 200px;
+  max-width: calc(100vw - 64px);
+  max-height: 200px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  background: #faf9f6;
+  border: var(--border-width) solid #dedbd5;
+  border-radius: var(--radius-control);
+  box-shadow: 0 4px 12px rgb(52 51 68 / 15%);
+}
+#skin-author-menu a {
+  display: block;
+  padding: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#skin-picker {
+  width: min(420px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  color: inherit;
+  background: #faf9f6;
+  border: var(--border-width) solid #dedbd5;
+  border-radius: 16px;
+  padding: 24px;
+}
+#skin-picker::backdrop {
+  background: rgb(52 51 68 / 35%);
+}
+.skin-choice {
+  display: flex;
+  align-items: center;
+  font-size: var(--font-label);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-width) solid #e8e5df;
+}
+.skin-choice input {
+  flex-shrink: 0;
+  margin-right: var(--space-2);
+}
+.skin-choice-preview {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  flex-shrink: 0;
+  margin-right: var(--space-3);
+}
+.skin-choice-details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.skin-choice-error {
+  color: #953c35;
+  overflow-wrap: anywhere;
+  margin-top: var(--space-2);
+}
+.skin-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-4);
+}
+.skin-picker-actions > * + * {
+  margin-left: var(--space-2);
+}
 .listener h2 {
   color: #9b623e;
   margin-bottom: var(--space-2);

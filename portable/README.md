@@ -13,8 +13,9 @@ The current working directory does not affect portable path resolution.
 - `webview-data/` is created at runtime for both application WebViews.
 
 Move the whole folder to keep settings and internal skins. Internal skin paths
-are saved relative to this folder; externally selected skins keep absolute paths
-and must be moved separately. A missing or invalid selected skin falls back to
+are saved relative to this folder. Put new skin folders directly in `skins/`;
+Choose skin lists only those folders, and Open skin folder opens this repository.
+External skin folders are not selectable. A missing or invalid selected skin falls back to
 the bundled example. Missing or invalid settings use application defaults.
 
 Portable mode does not import installed settings or modify existing launch-at-login

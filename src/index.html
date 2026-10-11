@@ -20,8 +20,16 @@
         <img id="preview" alt="Current skin preview" draggable="false" />
         <div>
           <h1 id="skin-name">Loading skin…</h1>
-          <p id="skin-path" class="path"></p>
-          <button id="choose-skin" class="primary">Choose skin folder…</button>
+          <div id="skin-author" class="empty" aria-hidden="true">
+            <p id="skin-author-name"></p>
+            <div id="skin-author-links">
+              <details id="skin-author-more" hidden>
+                <summary>More</summary>
+                <div id="skin-author-menu" aria-label="More author links"></div>
+              </details>
+            </div>
+          </div>
+          <button id="choose-skin" class="primary">Choose skin…</button>
         </div>
       </section>
       <div class="skin-actions">
@@ -126,6 +134,28 @@
         <button id="quit">Quit Tapkin</button>
       </footer>
     </main>
+    <dialog id="skin-picker" aria-labelledby="skin-picker-title">
+      <form id="skin-picker-form">
+        <h2 id="skin-picker-title">Choose a skin</h2>
+        <p>
+          Put skin folders directly in this directory, then reopen this dialog:
+        </p>
+        <p id="skin-repository-path" class="path"></p>
+        <div id="skin-choices"></div>
+        <p
+          id="skin-picker-error"
+          class="skin-choice-error"
+          role="alert"
+          hidden
+        ></p>
+        <div class="skin-picker-actions">
+          <button id="skin-cancel" type="button">Cancel</button>
+          <button id="skin-apply" type="submit" class="primary" disabled>
+            Apply
+          </button>
+        </div>
+      </form>
+    </dialog>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

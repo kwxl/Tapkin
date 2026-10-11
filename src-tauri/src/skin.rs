@@ -25,10 +25,63 @@ enum MappingKey {
 #[derive(Debug, Deserialize)]
 pub struct SkinConfig {
     pub name: String,
+    #[serde(default)]
+    pub author: Option<SkinAuthor>,
     pub idle: PathBuf,
     pub typing: Vec<PathBuf>,
     #[serde(default)]
     pub key_mappings: BTreeMap<String, PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkinAuthor {
+    pub name: String,
+    #[serde(default)]
+    pub links: BTreeMap<String, String>,
+}
+
+impl SkinAuthor {
+    fn validate(&self) -> Result<(), SkinError> {
+        if self.name.trim().is_empty()
+            || self.name.chars().count() > 80
+            || self.name.chars().any(char::is_control)
+        {
+            return Err(SkinError::Invalid(
+                "Author name must contain 1–80 printable characters".into(),
+            ));
+        }
+        if self.links.len() > 16 {
+            return Err(SkinError::Invalid(
+                "Author may have at most 16 links".into(),
+            ));
+        }
+        for (label, url) in &self.links {
+            if label.trim().is_empty()
+                || label.chars().count() > 40
+                || label.chars().any(char::is_control)
+            {
+                return Err(SkinError::Invalid(
+                    "Author link labels must contain 1–40 printable characters".into(),
+                ));
+            }
+            let authority = url
+                .strip_prefix("https://")
+                .or_else(|| url.strip_prefix("http://"))
+                .and_then(|rest| rest.split(['/', '?', '#']).next())
+                .unwrap_or("");
+            if url.len() > 2048
+                || url.chars().any(char::is_whitespace)
+                || url.chars().any(char::is_control)
+                || authority.is_empty()
+                || authority.contains(['@', '\\'])
+            {
+                return Err(SkinError::Invalid(format!(
+                    "Author link '{label}' must be an HTTP or HTTPS URL without credentials"
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -44,6 +97,7 @@ pub enum SkinError {
 #[derive(Clone, Serialize)]
 pub struct SkinView {
     pub name: String,
+    pub author: Option<SkinAuthor>,
     pub directory: PathBuf,
     pub width: u32,
     pub height: u32,
@@ -145,6 +199,9 @@ impl Skin {
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| SkinError::Invalid("pet.toml must be UTF-8".into()))?;
         let config: SkinConfig = toml::from_str(text)?;
+        if let Some(author) = &config.author {
+            author.validate()?;
+        }
         if config.name.trim().is_empty() || config.name.chars().count() > 80 {
             return Err(SkinError::Invalid(
                 "Skin name must contain 1–80 characters".into(),
@@ -212,6 +269,7 @@ impl Skin {
         Ok(Self {
             view: SkinView {
                 name: config.name.clone(),
+                author: config.author.clone(),
                 directory: root,
                 width,
                 height,
@@ -241,7 +299,16 @@ impl Skin {
 
 pub fn install_example(skins_dir: &Path) -> Result<PathBuf, std::io::Error> {
     let root = skins_dir.join("example");
-    fs::create_dir_all(&root)?;
+    install_default_at(&root)
+}
+
+pub fn install_default_at(root: &Path) -> Result<PathBuf, std::io::Error> {
+    if fs::symlink_metadata(root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(std::io::Error::other(
+            "Default skin folder must not be a symbolic link",
+        ));
+    }
+    fs::create_dir_all(root)?;
     for (name, bytes) in [
         (
             "pet.toml",
@@ -265,7 +332,7 @@ pub fn install_example(skins_dir: &Path) -> Result<PathBuf, std::io::Error> {
             fs::write(path, bytes)?;
         }
     }
-    Ok(root)
+    Ok(root.to_path_buf())
 }
 
 #[cfg(test)]
@@ -305,6 +372,42 @@ mod tests {
         assert_eq!(skin.mapped_frame(KeyCode::parse("KeyC").unwrap()), None);
         fs::write(root.join("special.png"), b"bad edit").unwrap();
         assert!(skin.frame_png(3).unwrap().starts_with(b"\x89PNG"));
+        assert!(Skin::load(&root).is_err());
+    }
+
+    #[test]
+    fn author_metadata_is_optional_and_reaches_the_view() {
+        let dir = example();
+        let root = dir.path().join("example");
+        assert!(Skin::load(&root).unwrap().view.author.is_none());
+        let base = "name='Cat'\nidle='idle.png'\ntyping=['typing_1.png','typing_2.png']\n";
+        config(&root, &format!("{base}[author]\nname='Artist'\n[author.links]\nX='https://x.com/artist'\nInstagram='https://www.instagram.com/artist/'"));
+        let author = Skin::load(&root).unwrap().view.author.unwrap();
+        assert_eq!(author.name, "Artist");
+        assert_eq!(author.links.len(), 2);
+        assert_eq!(author.links["X"], "https://x.com/artist");
+        config(&root, &format!("{base}[author]\nname='Artist'"));
+        assert!(Skin::load(&root)
+            .unwrap()
+            .view
+            .author
+            .unwrap()
+            .links
+            .is_empty());
+        for url in [
+            "javascript:alert(1)",
+            "file:///tmp/test",
+            "https://",
+            "https://user@example.com",
+            "https://example.com/ space",
+        ] {
+            config(
+                &root,
+                &format!("{base}[author]\nname='Artist'\n[author.links]\nX='{url}'"),
+            );
+            assert!(Skin::load(&root).is_err(), "{url}");
+        }
+        config(&root, &format!("{base}[author]\nname=''"));
         assert!(Skin::load(&root).is_err());
     }
 

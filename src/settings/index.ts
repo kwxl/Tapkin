@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import { createAutosave } from "../shared/autosave";
 import { field, updateRangeProgress } from "../shared/dom";
-import type { Patch, View } from "../shared/types";
+import type { Patch, View, SkinList } from "../shared/types";
+import { initializeAuthor } from "./author";
 
 export function initializeSettings({ getView, error }: {
   getView: () => View | undefined;
@@ -17,11 +17,14 @@ export function initializeSettings({ getView, error }: {
       error(e);
     }
   }
+  const renderAuthor = initializeAuthor((label) => {
+    void action(() => invoke("open_author_link", { label }));
+  });
   function renderSettings() {
     const view = getView();
     if (!view) return;
     field("skin-name").textContent = view.skin.name;
-    field("skin-path").textContent = view.skin.directory;
+    renderAuthor(view.skin.author);
     const width = field<HTMLInputElement>("width");
     if (document.activeElement !== width)
       width.value = String(Math.round(view.settings.window_size.width));
@@ -61,16 +64,93 @@ export function initializeSettings({ getView, error }: {
     field("warning").hidden = !view.warning;
   }
 
+  const skinDialog = field<HTMLDialogElement>("skin-picker");
+  const skinChoices = field("skin-choices");
+  const skinApply = field<HTMLButtonElement>("skin-apply");
+  const skinCancel = field<HTMLButtonElement>("skin-cancel");
+  let pickedSkin: string | undefined;
+  let applyingSkin = false;
+  skinCancel.addEventListener("click", () => skinDialog.close());
+  skinDialog.addEventListener("cancel", (event) => {
+    if (applyingSkin) event.preventDefault();
+  });
+  field("skin-picker-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!pickedSkin || applyingSkin) return;
+    const id = pickedSkin;
+    void action(async () => {
+      applyingSkin = true;
+      skinApply.disabled = true;
+      skinCancel.disabled = true;
+      try {
+        await invoke("load_skin", { id });
+        skinDialog.close();
+      } catch (e) {
+        field("skin-picker-error").textContent = String(e);
+        field("skin-picker-error").hidden = false;
+      } finally {
+        applyingSkin = false;
+        skinApply.disabled = !pickedSkin;
+        skinCancel.disabled = false;
+      }
+    });
+  });
   field("choose-skin").addEventListener(
     "click",
     () =>
       void action(async () => {
-        const directory = await open({
-          directory: true,
-          multiple: false,
-          title: "Choose a Tapkin skin folder",
-        });
-        if (directory) await invoke("load_skin", { directory });
+        if (skinDialog.open) return;
+        const repository = await invoke<SkinList>("list_skins");
+        field("skin-picker-error").hidden = true;
+        field("skin-repository-path").textContent = repository.directory;
+        skinChoices.replaceChildren();
+        pickedSkin = undefined;
+        for (const skin of repository.skins) {
+          const label = document.createElement("label");
+          label.className = "skin-choice";
+          const radio = document.createElement("input");
+          radio.type = "radio";
+          radio.name = "skin";
+          radio.value = skin.id;
+          radio.disabled = skin.error !== null;
+          radio.checked = skin.selected && !radio.disabled;
+          if (radio.checked) pickedSkin = skin.id;
+          radio.addEventListener("change", () => {
+            pickedSkin = skin.id;
+            skinApply.disabled = applyingSkin;
+          });
+          const text = document.createElement("span");
+          text.textContent = `${skin.name} (${skin.id})${skin.selected ? " — Current" : ""}`;
+          const details = document.createElement("div");
+          details.className = "skin-choice-details";
+          details.append(text);
+          label.append(radio);
+          if (skin.idle_image) {
+            const idle = document.createElement("img");
+            idle.className = "skin-choice-preview";
+            idle.src = skin.idle_image;
+            idle.alt = `${skin.name} idle preview`;
+            idle.width = 48;
+            idle.height = 48;
+            idle.decoding = "async";
+            label.append(idle);
+          }
+          label.append(details);
+          if (skin.error) {
+            const reason = document.createElement("p");
+            reason.className = "skin-choice-error";
+            reason.textContent = skin.error;
+            details.append(reason);
+          }
+          skinChoices.append(label);
+        }
+        if (!repository.skins.length) {
+          const empty = document.createElement("p");
+          empty.textContent = "No skins found. Put a skin folder in the directory above.";
+          skinChoices.append(empty);
+        }
+        skinApply.disabled = !pickedSkin;
+        skinDialog.showModal();
       }),
   );
   for (const [id, command] of [

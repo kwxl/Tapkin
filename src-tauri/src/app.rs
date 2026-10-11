@@ -3,7 +3,8 @@ use crate::{
     core::{apply_overlay_settings, restore_overlay_settings, FrameChange, InputStatus, TapkinApp},
     input::{platform_backend, InputEvent, InputListener},
     overlay::{tauri::TauriOverlayRenderer, OverlayRenderer},
-    skin::{install_example, Skin, SkinView},
+    skin::{install_default_at, install_example, Skin, SkinView},
+    skin_repository::{self, SkinList},
     storage::Storage,
     window::{aspect_size, Position},
 };
@@ -455,6 +456,10 @@ async fn update_settings(app: AppHandle, patch: SettingsPatch) -> Result<AppSett
 fn change_skin(app: &AppHandle, directory: PathBuf) -> Result<(), String> {
     let runtime = app.state::<Runtime>();
     let _mutation = runtime.mutations.lock().unwrap();
+    let directory = runtime
+        .storage
+        .validate_skin(&directory)
+        .map_err(|e| e.to_string())?;
     let skin = Skin::load(&directory).map_err(|e| e.to_string())?;
     let (old, overlay) = {
         let data = runtime.data.lock().unwrap();
@@ -507,10 +512,52 @@ fn change_skin(app: &AppHandle, directory: PathBuf) -> Result<(), String> {
     sync_tray(app)
 }
 #[tauri::command]
-async fn load_skin(app: AppHandle, directory: PathBuf) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || change_skin(&app, directory))
-        .await
-        .map_err(|e| e.to_string())?
+async fn load_skin(app: AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let directory = app
+            .state::<Runtime>()
+            .storage
+            .skin_by_id(&id)
+            .map_err(|e| e.to_string())?;
+        change_skin(&app, directory)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn list_skins(app: AppHandle) -> Result<SkinList, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = app.state::<Runtime>();
+        let selected = runtime.data.lock().unwrap().settings.selected_skin.clone();
+        skin_repository::list(&runtime.storage, &selected)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+fn open_author_link(app: AppHandle, label: String) -> Result<(), String> {
+    let url = {
+        let runtime = app.state::<Runtime>();
+        let data = runtime.data.lock().unwrap();
+        data.skin
+            .config
+            .author
+            .as_ref()
+            .and_then(|author| author.links.get(&label))
+            .cloned()
+            .ok_or_else(|| "Author link not found".to_string())?
+    };
+    let parsed = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
+    if !matches!(parsed.scheme(), "https" | "http")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err("Only HTTP and HTTPS author links without credentials are allowed".into());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
 async fn reload_skin(app: AppHandle) -> Result<(), String> {
@@ -522,18 +569,13 @@ async fn reload_skin(app: AppHandle) -> Result<(), String> {
         .settings
         .selected_skin
         .clone();
-    load_skin(app, directory).await
+    tauri::async_runtime::spawn_blocking(move || change_skin(&app, directory))
+        .await
+        .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 fn open_skin_folder(app: AppHandle) -> Result<(), String> {
-    let directory = app
-        .state::<Runtime>()
-        .data
-        .lock()
-        .unwrap()
-        .settings
-        .selected_skin
-        .clone();
+    let directory = app.state::<Runtime>().storage.skins_dir();
     app.opener()
         .open_path(directory.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
@@ -790,6 +832,8 @@ pub fn run() {
             update_settings,
             preview_size,
             load_skin,
+            list_skins,
+            open_author_link,
             reload_skin,
             open_skin_folder,
             retry_listener,
@@ -818,15 +862,26 @@ pub fn run() {
             } else {
                 &settings.selected_skin
             };
-            let skin = match Skin::load(selected) {
+            let skin = match storage.validate_skin(selected).map_err(|e| e.to_string()).and_then(|path| Skin::load(&path).map_err(|e| e.to_string())) {
                 Ok(skin) => skin,
                 Err(error) => {
                     warning = Some(format!(
-                        "Could not load the selected skin: {error}. Using the bundled example."
+                        "Could not load the selected skin: {error}. Using the bundled example. Put skin folders directly inside {}.", storage.skins_dir().display()
                     ));
                     match Skin::load(&example) {
                         Ok(skin) => skin,
-                        Err(_) => Skin::load(&install_example(&data_dir.join("recovery-skins"))?)?,
+                        Err(_) => {
+                            let mut recovery = None;
+                            for index in 1..=1000 {
+                                let path = storage.skins_dir().join(format!("recovery-{index}"));
+                                if !path.exists() {
+                                    let path = install_default_at(&path)?;
+                                    recovery = Some(Skin::load(&storage.validate_skin(&path)?)?);
+                                    break;
+                                }
+                            }
+                            recovery.ok_or_else(|| std::io::Error::other("No available recovery skin folder"))?
+                        },
                     }
                 }
             };
@@ -837,7 +892,6 @@ pub fn run() {
             );
             if storage.portable_root.is_some() {
                 settings.launch_at_login = false;
-                storage.save(&settings)?;
             } else {
                 match app.autolaunch().is_enabled() {
                     Ok(enabled) => settings.launch_at_login = enabled,
@@ -847,6 +901,7 @@ pub fn run() {
                     }
                 }
             }
+            storage.save(&settings)?;
             let renderer = Arc::new(TauriOverlayRenderer::new(app.handle().clone()));
             let data = Arc::new(Mutex::new(TapkinApp::new(
                 skin,

@@ -51,18 +51,44 @@ impl Storage {
     }
 
     pub fn resolve_skin(&self, path: &Path) -> PathBuf {
-        match &self.portable_root {
-            Some(root) if !path.as_os_str().is_empty() && path.is_relative() => root.join(path),
-            _ => path.to_path_buf(),
+        if !path.as_os_str().is_empty() && path.is_relative() {
+            self.data_dir.join(path)
+        } else {
+            path.to_path_buf()
         }
+    }
+
+    pub fn skins_dir(&self) -> PathBuf {
+        self.data_dir.join("skins")
+    }
+
+    pub fn validate_skin(&self, path: &Path) -> io::Result<PathBuf> {
+        let root = fs::canonicalize(self.skins_dir())?;
+        let path = fs::canonicalize(path)?;
+        if path.parent() != Some(root.as_path()) || !path.is_dir() {
+            return Err(io::Error::other("Choose a skin directly inside the skins folder. Move external skins into that folder first."));
+        }
+        Ok(path)
+    }
+
+    pub fn skin_by_id(&self, id: &str) -> io::Result<PathBuf> {
+        let mut components = Path::new(id).components();
+        if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+            || components.next().is_some()
+        {
+            return Err(io::Error::other("Invalid skin folder identifier"));
+        }
+        self.validate_skin(&self.skins_dir().join(id))
     }
 
     pub fn save(&self, settings: &AppSettings) -> io::Result<()> {
         let mut settings = settings.clone();
-        if let Some(root) = &self.portable_root {
-            if let Ok(relative) = settings.selected_skin.strip_prefix(root) {
-                settings.selected_skin = relative.to_path_buf();
-            }
+        let path = self.validate_skin(&self.resolve_skin(&settings.selected_skin))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| io::Error::other("Skin has no folder name"))?;
+        settings.selected_skin = PathBuf::from("skins").join(name);
+        if self.portable_root.is_some() {
             settings.launch_at_login = false;
         }
         settings.save(&self.settings_path)
@@ -129,11 +155,7 @@ mod tests {
             selected_skin: external.clone(),
             ..Default::default()
         };
-        paths.save(&settings).unwrap();
-        assert_eq!(
-            AppSettings::load(&paths.settings_path).0.selected_skin,
-            external
-        );
+        assert!(paths.save(&settings).is_err());
     }
 
     #[test]

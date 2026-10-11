@@ -1,9 +1,14 @@
 export type Skin = {
   name: string;
+  author: { name: string; links: Record<string, string> } | null;
   directory: string;
   width: number;
   height: number;
   images: string[];
+};
+export type SkinList = {
+  directory: string;
+  skins: { id: string; name: string; idle_image: string | null; selected: boolean; error: string | null }[];
 };
 export type Settings = {
   selected_skin: string;
