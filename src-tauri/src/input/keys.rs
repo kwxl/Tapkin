@@ -111,7 +111,7 @@ impl KeyCode {
             .map(|entry| Self(entry.0))
     }
 
-    #[cfg(any(target_os = "windows", test))]
+    #[cfg(any(target_os = "windows", target_os = "linux", test))]
     pub(super) fn from_windows(scan: u32, extended: bool) -> Option<Self> {
         let code = scan | if extended { 0xe000 } else { 0 };
         KEYS.iter()
