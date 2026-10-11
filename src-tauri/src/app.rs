@@ -741,9 +741,15 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         locked,
         login,
     });
-    TrayIconBuilder::with_id("tapkin")
-        .icon(app.default_window_icon().expect("bundled icon").clone())
-        .tooltip("Tapkin — desktop typing companion")
+    let tray = TrayIconBuilder::with_id("tapkin");
+    // macOS draws the menu-bar icon from its alpha only (template image), so it follows light/dark mode.
+    #[cfg(target_os = "macos")]
+    let tray = tray
+        .icon(tauri::include_image!("icons/tray/macos.png"))
+        .icon_as_template(true);
+    #[cfg(not(target_os = "macos"))]
+    let tray = tray.icon(app.default_window_icon().expect("bundled icon").clone());
+    tray.tooltip("Tapkin — desktop typing companion")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .build(app)?;
