@@ -36,6 +36,21 @@ test("tokens load before component styles", () => {
   assert.ok(entry.indexOf('./styles/controls.css') < entry.indexOf('./styles/settings.css'));
 });
 
+test("settings header uses the bundled app icon beside the brand", () => {
+  const html = readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
+  const css = readFileSync(new URL("settings.css", directory), "utf8");
+  assert.match(html, /class="brand-icon"\s+src="\/app-icon\.png"\s+alt=""/);
+  const config = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
+  assert.match(config, /publicDir: "\.\.\/public"/);
+  const icon = readFileSync(new URL("../public/app-icon.png", import.meta.url));
+  assert.deepEqual(icon, readFileSync(new URL("../src-tauri/icons/128x128.png", import.meta.url)));
+  assert.equal(icon.subarray(1, 4).toString(), "PNG");
+  assert.match(css, /\.settings-view header\s*\{\s*display: flex;\s*align-items: center;/);
+  assert.match(css, /\.brand-icon\s*\{[^}]*flex-shrink: 0;/);
+  const header = html.match(/<header>([\s\S]*?)<\/header>/)[1];
+  assert.ok(header.indexOf('class="brand-icon"') < header.indexOf('class="brand-copy"'));
+});
+
 test("radio controls match existing control colors and support disabled and checked states", () => {
   const css = readFileSync(new URL("controls.css", directory), "utf8");
   assert.match(css, /input\[type="radio"\]\s*\{[^}]*appearance: none;[^}]*border: var\(--border-width\) solid #dedbd5;[^}]*border-radius: 50%;[^}]*background: #fff;/);

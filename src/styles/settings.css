@@ -15,6 +15,23 @@
   padding: 28px;
   margin: 0 auto;
 }
+.settings-view header {
+  display: flex;
+  align-items: center;
+  justify-content: start;
+  gap: var(--space-3);
+}
+.brand-icon {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.brand-copy {
+  min-width: 0;
+}
 .brand {
   font-size: 28px;
   font-weight: 700;
