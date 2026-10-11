@@ -22,7 +22,7 @@ jobs:
             bundles: nsis
             artifact: tapkin-windows
           - os: ubuntu-22.04
-            bundles: deb
+            bundles: deb,rpm
             artifact: tapkin-linux-deb
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -55,6 +55,14 @@ jobs:
       - run: cargo test --locked
         working-directory: src-tauri
       - run: pnpm run tauri build --bundles ${{ matrix.bundles }}
+      - name: Upload Linux RPM bundle
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tapkin-linux-rpm
+          path: src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
+          retention-days: 14
       - name: Package Windows portable executable
         if: runner.os == 'Windows'
         shell: pwsh
