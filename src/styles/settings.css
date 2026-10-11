@@ -17,7 +17,7 @@
 }
 .brand {
   font-size: 28px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -1px;
 }
 p {
@@ -30,12 +30,16 @@ section {
   border-top: var(--border-width) solid #e8e5df;
   padding: 20px 0;
 }
+h1,
+h2 {
+  font-weight: 700;
+}
 h1 {
   font-size: 20px;
   margin: 0;
 }
 h2 {
-  font-size: var(--font-label);
+  font-size: 16px;
   margin: 0 0 var(--space-4);
 }
 
